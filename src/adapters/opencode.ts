@@ -72,6 +72,16 @@ export class OpenCodeAdapter implements AgentAdapter {
         `Arranca OpenCode con \`opencode serve --port 4096\` y reanuda el ciclo.`;
     }
 
+    // El proveedor se resuelve por directorio (opencode.json del proyecto + config global):
+    // si no está conectado para este workspace, OpenCode responde un 500 genérico.
+    // Lo comprobamos antes para dar un mensaje útil en vez de reintentar a ciegas.
+    const connected = await this.connectedProviders(task.projectPath);
+    if (connected && !connected.includes(this.config.providerID)) {
+      return `⚠️ **OpenCode: el proveedor \`${this.config.providerID}\` no está conectado para \`${task.projectPath}\`** ` +
+        `(conectados: ${connected.join(', ') || 'ninguno'}). Ejecuta \`opencode auth login\`, declara el proveedor en ` +
+        `\`opencode.json\` del proyecto o ajusta OPENCODE_PROVIDER/OPENCODE_MODEL en \`.env\`.`;
+    }
+
     await this.refreshSkillsIfNeeded(task);
 
     let lastError = '';
@@ -113,10 +123,11 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
   }
 
-  /** Ids de proveedores con credenciales en OpenCode, o `undefined` si no se pudo consultar. */
-  private async connectedProviders(): Promise<string[] | undefined> {
+  /** Ids de proveedores con credenciales en OpenCode (para un workspace, si se indica), o `undefined` si no se pudo consultar. */
+  private async connectedProviders(directory?: string): Promise<string[] | undefined> {
     try {
-      const response = await fetch(`${this.config.url}/provider`, { signal: AbortSignal.timeout(5000) });
+      const query = directory ? `?${new URLSearchParams({ directory }).toString()}` : '';
+      const response = await fetch(`${this.config.url}/provider${query}`, { signal: AbortSignal.timeout(5000) });
       if (!response.ok) return undefined;
       const body = await response.json() as { connected?: string[] };
       return Array.isArray(body.connected) ? body.connected : undefined;

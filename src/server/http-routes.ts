@@ -10,6 +10,7 @@ import { AgentRegistry } from '../agents/registry';
 import { PHASE_LABELS } from '../core/phases';
 import { SkillCoordinator } from '../skills/skill-coordinator';
 import { SkillLibrary } from '../skills/skill-library';
+import { listWorkspace, resolveWorkspaceFile, WorkspaceAccessError } from '../core/workspace-files';
 
 export interface HttpRouteDeps {
   orchestrator: Orchestrator;
@@ -99,5 +100,51 @@ export function createHttpRoutes({ orchestrator, registry, skills, skillLibrary,
     res.json(conversation);
   });
 
+  /**
+   * Archivos del workspace de una sesión (solo lectura), para ver en el panel lo
+   * que producen los agentes: informes, gráficos, datos.
+   *   GET /conversations/:id/files?dir=sub/carpeta   → listado
+   *   GET /conversations/:id/files/raw?path=a/b.svg  → contenido con su MIME
+   */
+  router.get('/conversations/:id/files', (req, res) => {
+    const conversation = orchestrator.getConversation(req.params.id);
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversación no encontrada' });
+      return;
+    }
+    try {
+      const dir = typeof req.query.dir === 'string' ? req.query.dir : '';
+      res.json({ workspace: conversation.projectPath, dir, entries: listWorkspace(conversation.projectPath, dir) });
+    } catch (err) {
+      sendWorkspaceError(res, err);
+    }
+  });
+
+  router.get('/conversations/:id/files/raw', (req, res) => {
+    const conversation = orchestrator.getConversation(req.params.id);
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversación no encontrada' });
+      return;
+    }
+    try {
+      const file = resolveWorkspaceFile(conversation.projectPath, String(req.query.path ?? ''));
+      res.type(file.mime);
+      // El HTML generado por los agentes se sirve en un sandbox (iframe) desde el panel;
+      // esta cabecera evita que scripts de ese HTML accedan al panel.
+      res.setHeader('Content-Security-Policy', "sandbox allow-scripts; default-src 'self' 'unsafe-inline' data: blob: https:;");
+      res.sendFile(file.path);
+    } catch (err) {
+      sendWorkspaceError(res, err);
+    }
+  });
+
   return router;
+}
+
+function sendWorkspaceError(res: import('express').Response, err: unknown): void {
+  if (err instanceof WorkspaceAccessError) {
+    res.status(err.status).json({ error: err.message });
+  } else {
+    res.status(500).json({ error: (err as Error).message });
+  }
 }

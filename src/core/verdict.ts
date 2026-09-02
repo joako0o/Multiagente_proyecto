@@ -33,6 +33,18 @@ export function parseVerdict(text: string): Verdict | undefined {
 }
 
 /**
+ * Extrae el agente al que el arquitecto quiere pasar el turno: `[SIGUIENTE: aider]`.
+ * Devuelve `undefined` si no hay etiqueta o el id no es válido; el orquestador
+ * entonces sigue el round-robin normal.
+ */
+export function parseNextAgent(text: string, isKnownAgent: (id: string) => boolean): string | undefined {
+  const match = text.match(/\[\s*SIGUIENTE\s*:\s*`?\s*([a-z0-9_-]+)\s*`?\s*\]/i);
+  if (!match) return undefined;
+  const id = match[1].toLowerCase();
+  return isKnownAgent(id) ? id : undefined;
+}
+
+/**
  * Extrae la lista de ids de agentes de una etiqueta `[EQUIPO: a, b, c]`.
  * Solo devuelve los ids que existen según `isKnownAgent`; si no hay etiqueta
  * o ningún id es válido, devuelve `undefined`.

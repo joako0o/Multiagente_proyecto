@@ -30,7 +30,13 @@ const state = {
   currentStatus: 'idle',
   currentMaxTurns: 15,
   /** Objetivo escrito antes de que exista sesión; se envía en cuanto se crea. */
-  pendingPrompt: null
+  pendingPrompt: null,
+  /** Pestaña activa del área central: 'messages' | 'files'. */
+  tab: 'messages',
+  /** Carpeta abierta en el explorador (relativa al workspace). */
+  filesDir: '',
+  /** Archivo previsualizado. */
+  filesSelected: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -146,6 +152,7 @@ function handleServerEvent(event) {
       }
       if (event.data.status === 'completed') log('Ciclo finalizado', 'ok');
       if (event.data.status === 'paused') log('Ciclo en pausa', 'info');
+      if (isCurrent && state.tab === 'files' && event.data.status !== 'active') loadFiles();
       break;
 
     case 'error':
@@ -391,6 +398,10 @@ async function openConversation(id) {
     container.innerHTML = '';
     conv.messages.forEach(appendMessage);
 
+    state.filesDir = '';
+    state.filesSelected = null;
+    if (state.tab === 'files') loadFiles();
+
     updateButtons();
     upsertConversation(conv);
   } catch (err) {
@@ -464,6 +475,123 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = String(text ?? '');
   return div.innerHTML;
+}
+
+/* --- Archivos del workspace --------------------------------------------- */
+
+function setTab(tab) {
+  state.tab = tab;
+  for (const btn of $('chatTabs').querySelectorAll('.tab')) btn.classList.toggle('active', btn.dataset.tab === tab);
+  $('messages').hidden = tab !== 'messages';
+  $('filesPanel').hidden = tab !== 'files';
+  if (tab === 'files') loadFiles();
+}
+
+async function loadFiles() {
+  const list = $('fileList');
+  if (!state.currentId) {
+    list.innerHTML = '<li class="muted">Selecciona una sesión</li>';
+    return;
+  }
+  try {
+    const url = `/api/conversations/${state.currentId}/files?dir=${encodeURIComponent(state.filesDir)}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    renderBreadcrumbs(data.workspace);
+    list.innerHTML = '';
+    if (state.filesDir) {
+      const up = document.createElement('li');
+      up.className = 'file-item';
+      up.innerHTML = '<span class="fname">📁 ..</span>';
+      up.addEventListener('click', () => { state.filesDir = state.filesDir.split('/').slice(0, -1).join('/'); loadFiles(); });
+      list.appendChild(up);
+    }
+    if (!data.entries.length) list.innerHTML += '<li class="muted">Carpeta vacía</li>';
+    for (const entry of data.entries) {
+      const li = document.createElement('li');
+      li.className = 'file-item' + (entry.path === state.filesSelected ? ' active' : '');
+      li.title = entry.path;
+      li.innerHTML = `<span class="fname">${entry.type === 'dir' ? '📁' : iconFor(entry.name)} ${escapeHtml(entry.name)}</span>` +
+        `<span class="fmeta">${entry.type === 'dir' ? '' : formatBytes(entry.size)}</span>`;
+      li.addEventListener('click', () => {
+        if (entry.type === 'dir') { state.filesDir = entry.path; loadFiles(); }
+        else previewFile(entry);
+      });
+      list.appendChild(li);
+    }
+  } catch (err) {
+    list.innerHTML = `<li class="muted">No se pudo listar: ${escapeHtml(err.message)}</li>`;
+  }
+}
+
+function renderBreadcrumbs(workspace) {
+  const nav = $('fileBreadcrumbs');
+  const parts = state.filesDir ? state.filesDir.split('/') : [];
+  const crumbs = [`<a data-dir="" title="${escapeHtml(workspace)}">${escapeHtml(workspace.split(/[\\/]/).pop() || workspace)}</a>`];
+  parts.forEach((part, i) => crumbs.push('›', `<a data-dir="${escapeHtml(parts.slice(0, i + 1).join('/'))}">${escapeHtml(part)}</a>`));
+  nav.innerHTML = crumbs.join(' ');
+  for (const a of nav.querySelectorAll('a')) a.addEventListener('click', () => { state.filesDir = a.dataset.dir; loadFiles(); });
+}
+
+async function previewFile(entry) {
+  state.filesSelected = entry.path;
+  for (const li of $('fileList').querySelectorAll('.file-item')) li.classList.toggle('active', li.title === entry.path);
+
+  const box = $('filePreview');
+  const rawUrl = `/api/conversations/${state.currentId}/files/raw?path=${encodeURIComponent(entry.path)}`;
+  const header = `<div class="preview-header"><span>${escapeHtml(entry.path)} · ${formatBytes(entry.size)} · ${new Date(entry.modifiedAt).toLocaleString()}</span><a href="${rawUrl}" target="_blank" rel="noopener">Abrir en pestaña ↗</a></div>`;
+  const ext = (entry.name.split('.').pop() || '').toLowerCase();
+
+  try {
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+      box.innerHTML = header + `<img src="${rawUrl}" alt="${escapeHtml(entry.name)}">`;
+    } else if (['html', 'htm'].includes(ext)) {
+      // sandbox: el HTML generado por los agentes puede tener scripts (d3) pero no accede al panel.
+      box.innerHTML = header + `<iframe src="${rawUrl}" sandbox="allow-scripts" title="${escapeHtml(entry.name)}"></iframe>`;
+    } else if (ext === 'pdf') {
+      box.innerHTML = header + `<object data="${rawUrl}" type="application/pdf" width="100%" height="600"><p class="muted">Tu navegador no muestra PDF embebido; usa "Abrir en pestaña".</p></object>`;
+    } else {
+      const text = await fetch(rawUrl).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
+      if (ext === 'md') {
+        box.innerHTML = header + `<div class="message-content">${DOMPurify.sanitize(marked.parse(text))}</div>`;
+      } else if (ext === 'csv') {
+        box.innerHTML = header + renderCsv(text);
+      } else {
+        box.innerHTML = header + `<pre>${escapeHtml(text.slice(0, 200_000))}${text.length > 200_000 ? '\n… (recortado)' : ''}</pre>`;
+      }
+    }
+  } catch (err) {
+    box.innerHTML = header + `<p class="muted">No se pudo cargar: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+/** Tabla simple para CSV (separador coma o punto y coma, sin comillas anidadas complejas). */
+function renderCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 500);
+  if (!lines.length) return '<p class="muted">CSV vacío</p>';
+  const sep = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : ',';
+  const rows = lines.map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '')));
+  const head = rows[0].map(c => `<th>${escapeHtml(c)}</th>`).join('');
+  const body = rows.slice(1).map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('');
+  return `<table class="csv"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>` +
+    (text.split('\n').length > 500 ? '<p class="muted">Mostrando las primeras 500 filas.</p>' : '');
+}
+
+function iconFor(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return '🖼️';
+  if (['html', 'htm'].includes(ext)) return '🌐';
+  if (ext === 'md') return '📝';
+  if (['csv', 'json', 'parquet', 'xlsx'].includes(ext)) return '📊';
+  if (['py', 'js', 'ts', 'r', 'sql'].includes(ext)) return '📄';
+  if (ext === 'pdf') return '📕';
+  return '📄';
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /* ========================================================================
@@ -546,6 +674,8 @@ $('composer').addEventListener('submit', submitComposer);
 $('pauseBtn').addEventListener('click', pauseLoop);
 $('resumeBtn').addEventListener('click', resumeLoop);
 $('refreshStatusBtn').addEventListener('click', refreshAgentStatus);
+$('chatTabs').addEventListener('click', (e) => { const btn = e.target.closest('.tab'); if (btn) setTab(btn.dataset.tab); });
+$('refreshFilesBtn').addEventListener('click', loadFiles);
 $('syncSkillsBtn').addEventListener('click', syncSkills);
 $('closeSkillBtn').addEventListener('click', () => { $('skillModal').hidden = true; });
 $('skillModal').addEventListener('click', (e) => { if (e.target.id === 'skillModal') $('skillModal').hidden = true; });

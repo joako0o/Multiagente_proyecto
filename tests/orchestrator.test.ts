@@ -30,7 +30,7 @@ function setup(adapters: Partial<Record<AgentType, FakeAdapter>>) {
     registry.register(type as AgentType, adapter!);
   }
   const history = new HistoryWriter(mkdtempSync(join(tmpdir(), 'bridge-test-')));
-  const orchestrator = new Orchestrator(registry, history, { maxTurns: 10, delayBetweenTurnsMs: 0, autoStopOnError: false });
+  const orchestrator = new Orchestrator({ registry, history, defaults: { maxTurns: 10, delayBetweenTurnsMs: 0, autoStopOnError: false } });
   const events: ServerEvent[] = [];
   orchestrator.on('event', (e: ServerEvent) => events.push(e));
   return { orchestrator, events, registry };
@@ -181,6 +181,41 @@ describe('Orchestrator', () => {
     await waitForIdle(orchestrator, conv.id);
     assert.throws(() => orchestrator.startLoop(conv.id, 'c'), /completada/);
     assert.throws(() => orchestrator.resumeLoop(conv.id), /completada/);
+  });
+
+  test('[SIGUIENTE: id] en la revisión salta el round-robin y lo realinea', async () => {
+    // Equipo: antigravity → opencode → aider → interpreter. Tras la primera revisión el
+    // arquitecto manda directamente a aider; después el orden continúa desde aider.
+    const architect = new FakeAdapter((_t, call) => {
+      if (call === 1) return 'Plan';
+      if (call === 2) return 'Falta Y.\nVEREDICTO: REQUIERE_CAMBIOS\n[SIGUIENTE: aider]';
+      return 'VEREDICTO: APROBADO';
+    });
+    const opencode = new FakeAdapter(() => 'oc');
+    const aider = new FakeAdapter(() => 'ai');
+    const interpreter = new FakeAdapter(() => 'in');
+    const { orchestrator } = setup({ antigravity: architect, opencode, aider, interpreter });
+
+    const conv = orchestrator.createConversation({ title: 'Next', agentIds: ['antigravity', 'opencode', 'aider', 'interpreter'], maxTurns: 20 });
+    orchestrator.startLoop(conv.id, 'Objetivo');
+    await waitForIdle(orchestrator, conv.id);
+
+    const order = conv.messages.filter(m => m.role === 'agent').map(m => m.agentId);
+    // t0 antigravity, t1 opencode, t2 aider, t3 interpreter, t4 antigravity(REQUIERE_CAMBIOS → aider),
+    // t5 aider, t6 interpreter, t7 antigravity(APROBADO)
+    assert.deepEqual(order, ['antigravity', 'opencode', 'aider', 'interpreter', 'antigravity', 'aider', 'interpreter', 'antigravity']);
+    assert.equal(conv.status, 'completed');
+    assert.equal(conv.nextAgentId, undefined);
+  });
+
+  test('[SIGUIENTE] apuntando a un agente fuera del equipo se ignora', async () => {
+    const architect = new FakeAdapter((_t, call) => call === 1 ? 'Plan' : call === 2 ? 'VEREDICTO: REQUIERE_CAMBIOS\n[SIGUIENTE: aider]' : 'VEREDICTO: APROBADO');
+    const opencode = new FakeAdapter(() => 'oc');
+    const { orchestrator } = setup({ antigravity: architect, opencode, aider: new FakeAdapter(() => 'nunca') });
+    const conv = orchestrator.createConversation({ title: 'NextOut', agentIds: ['antigravity', 'opencode'], maxTurns: 10 });
+    orchestrator.startLoop(conv.id, 'Objetivo');
+    await waitForIdle(orchestrator, conv.id);
+    assert.deepEqual(conv.messages.filter(m => m.role === 'agent').map(m => m.agentId), ['antigravity', 'opencode', 'antigravity', 'opencode', 'antigravity']);
   });
 
   test('el prompt que recibe cada agente incluye el workspace y el objetivo', async () => {

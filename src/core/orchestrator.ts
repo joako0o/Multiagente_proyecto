@@ -35,9 +35,10 @@ import {
 import { AgentRegistry } from '../agents/registry';
 import { ARCHITECT_ID, DEFAULT_TEAM } from '../agents/catalog';
 import { HistoryWriter } from './history-writer';
+import { SessionStore } from './session-store';
 import { buildPrompt } from './prompt-builder';
 import { phaseForTurn } from './phases';
-import { parseTeamSelection, parseVerdict } from './verdict';
+import { parseNextAgent, parseTeamSelection, parseVerdict } from './verdict';
 import { normalizeProjectPath } from '../utils/paths';
 import { SkillCoordinator } from '../skills/skill-coordinator';
 
@@ -51,21 +52,50 @@ export interface CreateConversationInput {
   skills?: Record<string, string[]>;
 }
 
+export interface OrchestratorDeps {
+  registry: AgentRegistry;
+  /** Historial legible (`.md`) por sesión. */
+  history: HistoryWriter;
+  /** Estado recuperable (`.json`) por sesión. Opcional: sin él, las sesiones viven solo en memoria. */
+  store?: SessionStore;
+  skills?: SkillCoordinator;
+  defaults: LoopOptions;
+}
+
 export class Orchestrator extends EventEmitter {
   private readonly conversations = new Map<string, Conversation>();
   /** Conversaciones con un runLoop() en ejecución. Evita solapar ciclos. */
   private readonly running = new Set<string>();
+  private readonly registry: AgentRegistry;
+  private readonly history: HistoryWriter;
+  private readonly store?: SessionStore;
   private readonly skills: SkillCoordinator;
+  private readonly defaults: LoopOptions;
 
-  constructor(
-    private readonly registry: AgentRegistry,
-    private readonly history: HistoryWriter,
-    private readonly defaults: LoopOptions,
-    skills?: SkillCoordinator
-  ) {
+  constructor(deps: OrchestratorDeps) {
     super();
+    this.registry = deps.registry;
+    this.history = deps.history;
+    this.store = deps.store;
+    this.defaults = deps.defaults;
     // Sin biblioteca configurada, el coordinador es neutro (no añade nada a los prompts).
-    this.skills = skills ?? new SkillCoordinator(undefined);
+    this.skills = deps.skills ?? new SkillCoordinator(undefined);
+  }
+
+  /** Recupera las sesiones guardadas por el `SessionStore` (llamar una vez al arrancar). */
+  restore(): number {
+    if (!this.store) return 0;
+    const restored = this.store.loadAll();
+    for (const conversation of restored) {
+      this.conversations.set(conversation.id, conversation);
+    }
+    return restored.length;
+  }
+
+  /** Guarda el `.md` legible y el `.json` recuperable. */
+  private persist(conversation: Conversation): void {
+    this.history.save(conversation);
+    this.store?.save(conversation);
   }
 
   // ---------------------------------------------------------------------------
@@ -112,7 +142,7 @@ export class Orchestrator extends EventEmitter {
     };
 
     this.conversations.set(conversation.id, conversation);
-    this.history.save(conversation);
+    this.persist(conversation);
     return conversation;
   }
 
@@ -130,7 +160,7 @@ export class Orchestrator extends EventEmitter {
     };
     conversation.messages.push(message);
     conversation.updatedAt = message.timestamp;
-    this.history.save(conversation);
+    this.persist(conversation);
     this.emitEvent({ type: 'message', conversationId, data: message });
     return message;
   }
@@ -224,7 +254,7 @@ export class Orchestrator extends EventEmitter {
 
       conversation.currentTurn++;
       conversation.updatedAt = new Date();
-      this.history.save(conversation);
+      this.persist(conversation);
 
       if (goalReached) {
         this.setPhase(conversation, 'COMPLETED');
@@ -308,6 +338,13 @@ export class Orchestrator extends EventEmitter {
       if (verdict) metadata.verdict = verdict;
       goalReached = verdict === 'APPROVED';
       metadata.goalReached = goalReached;
+
+      // El arquitecto puede saltarse el round-robin y pasar el turno a quien deba corregir.
+      const next = parseNextAgent(response, id => conversation.agents.includes(id) && id !== ARCHITECT_ID);
+      if (next && !goalReached) {
+        conversation.nextAgentId = next;
+        console.log(`[Orchestrator] el arquitecto pasa el turno a ${this.registry.displayName(next)}`);
+      }
     }
 
     this.addMessage(conversation.id, agent.id, response, 'agent', metadata);
@@ -325,8 +362,22 @@ export class Orchestrator extends EventEmitter {
     this.addMessage(conversation.id, 'system', `🧠 El arquitecto definió el equipo: ${names}`, 'system');
   }
 
+  /**
+   * Agente del turno actual. Por defecto round-robin sobre `conversation.agents`;
+   * si el arquitecto pidió `[SIGUIENTE: id]` en su última revisión, ese agente
+   * toma el turno (una sola vez) y el round-robin continúa desde él.
+   */
   private agentForTurn(conversation: Conversation): Agent {
-    const id = conversation.agents[conversation.currentTurn % conversation.agents.length];
+    let id = conversation.agents[conversation.currentTurn % conversation.agents.length];
+
+    if (conversation.nextAgentId && conversation.agents.includes(conversation.nextAgentId)) {
+      id = conversation.nextAgentId;
+      // Realineamos el round-robin para que el siguiente turno sea el agente que va después del elegido.
+      const offset = conversation.agents.indexOf(id) - (conversation.currentTurn % conversation.agents.length);
+      conversation.agents = rotate(conversation.agents, offset);
+    }
+    conversation.nextAgentId = undefined;
+
     const agent = this.registry.get(id);
     if (!agent) throw new Error(`Agente desconocido: ${id}`);
     return agent;
@@ -339,7 +390,7 @@ export class Orchestrator extends EventEmitter {
   private setPhase(conversation: Conversation, phase: ConversationPhase): void {
     if (conversation.phase === phase) return;
     conversation.phase = phase;
-    this.history.save(conversation);
+    this.persist(conversation);
     this.emitEvent({ type: 'phase_change', conversationId: conversation.id, data: { phase, turn: conversation.currentTurn } });
   }
 
@@ -347,7 +398,7 @@ export class Orchestrator extends EventEmitter {
     if (conversation.status === status) return;
     conversation.status = status;
     conversation.updatedAt = new Date();
-    this.history.save(conversation);
+    this.persist(conversation);
     this.emitEvent({
       type: 'status',
       conversationId: conversation.id,
@@ -385,6 +436,13 @@ export function summarize(c: Conversation): ConversationSummary {
     skills: c.skills,
     updatedAt: c.updatedAt
   };
+}
+
+/** Rota una lista `offset` posiciones a la izquierda (offset negativo = derecha). */
+function rotate<T>(items: T[], offset: number): T[] {
+  if (!items.length) return items;
+  const k = ((offset % items.length) + items.length) % items.length;
+  return [...items.slice(k), ...items.slice(0, k)];
 }
 
 function clampTurns(value: number): number {

@@ -12,6 +12,7 @@ import { AppConfig } from '../config';
 import { createAgentRegistry } from '../agents/registry';
 import { Orchestrator } from '../core/orchestrator';
 import { HistoryWriter } from '../core/history-writer';
+import { SessionStore } from '../core/session-store';
 import { createHttpRoutes } from './http-routes';
 import { ChatWebSocketServer } from './websocket-server';
 import { SkillLibrary } from '../skills/skill-library';
@@ -34,12 +35,15 @@ export class BridgeServer {
       : undefined;
     const skills = new SkillCoordinator(this.skillLibrary);
 
-    this.orchestrator = new Orchestrator(
+    this.orchestrator = new Orchestrator({
       registry,
-      new HistoryWriter(config.historyDir),
-      { maxTurns: config.loop.maxTurns, delayBetweenTurnsMs: config.loop.delayBetweenTurnsMs, autoStopOnError: false },
-      skills
-    );
+      history: new HistoryWriter(config.historyDir),
+      store: new SessionStore(config.sessionsDir),
+      skills,
+      defaults: { maxTurns: config.loop.maxTurns, delayBetweenTurnsMs: config.loop.delayBetweenTurnsMs, autoStopOnError: false }
+    });
+    const restored = this.orchestrator.restore();
+    if (restored) console.log(`[Sesiones] ${restored} sesión(es) recuperadas de ${config.sessionsDir}`);
 
     this.app.use(express.json({ limit: '1mb' }));
     this.app.use('/api', createHttpRoutes({ orchestrator: this.orchestrator, registry, skills, skillLibrary: this.skillLibrary, version: APP_VERSION }));

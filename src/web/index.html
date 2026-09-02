@@ -70,6 +70,11 @@
         <span class="phase-badge" id="phaseBadge">—</span>
       </div>
 
+      <div class="tabs" id="chatTabs">
+        <button class="tab active" data-tab="messages" type="button">💬 Conversación</button>
+        <button class="tab" data-tab="files" type="button">📁 Archivos del workspace</button>
+      </div>
+
       <div class="messages" id="messages">
         <div class="empty-state" id="emptyState">
           <p><strong>Cómo funciona</strong></p>
@@ -79,6 +84,19 @@
             <li>Los agentes se turnan: implementan, ejecutan pruebas y revisan.</li>
             <li>El ciclo termina cuando el arquitecto aprueba el resultado.</li>
           </ol>
+        </div>
+      </div>
+
+      <div class="files" id="filesPanel" hidden>
+        <div class="files-toolbar">
+          <nav class="breadcrumbs" id="fileBreadcrumbs"></nav>
+          <button class="btn btn-ghost btn-small" id="refreshFilesBtn" type="button">↻ Actualizar</button>
+        </div>
+        <div class="files-body">
+          <ul class="file-list" id="fileList"><li class="muted">Selecciona una sesión</li></ul>
+          <div class="file-preview" id="filePreview">
+            <p class="muted">Elige un archivo para previsualizarlo: informes Markdown, gráficos SVG/PNG, páginas HTML con d3, CSV…</p>
+          </div>
         </div>
       </div>
 

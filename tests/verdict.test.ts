@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseVerdict, parseTeamSelection } from '../src/core/verdict';
+import { parseVerdict, parseTeamSelection, parseNextAgent } from '../src/core/verdict';
 
 describe('parseVerdict', () => {
   test('detecta la línea explícita de aprobación', () => {
@@ -51,5 +51,19 @@ describe('parseTeamSelection', () => {
   test('devuelve undefined si no hay etiqueta o ningún id es válido', () => {
     assert.equal(parseTeamSelection('Plan sin equipo', known), undefined);
     assert.equal(parseTeamSelection('[EQUIPO: cursor, manus]', known), undefined);
+  });
+});
+
+describe('parseNextAgent', () => {
+  const known = (id: string) => ['opencode', 'aider', 'interpreter'].includes(id);
+
+  test('extrae el id, tolerando mayúsculas, espacios y backticks', () => {
+    assert.equal(parseNextAgent('Falta X.\nVEREDICTO: REQUIERE_CAMBIOS\n[SIGUIENTE: aider]', known), 'aider');
+    assert.equal(parseNextAgent('[ siguiente :  `OpenCode` ]', known), 'opencode');
+  });
+
+  test('devuelve undefined sin etiqueta o con id desconocido', () => {
+    assert.equal(parseNextAgent('VEREDICTO: REQUIERE_CAMBIOS', known), undefined);
+    assert.equal(parseNextAgent('[SIGUIENTE: cursor]', known), undefined);
   });
 });

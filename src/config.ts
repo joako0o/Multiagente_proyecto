@@ -88,6 +88,8 @@ export interface AppConfig {
 
   /** Carpeta donde se guarda el historial `.md` de cada sesión. */
   historyDir: string;
+  /** Carpeta con el estado `.json` de cada sesión (para sobrevivir a reinicios). */
+  sessionsDir: string;
 
   /**
    * Biblioteca de skills (estándar Agent Skills, archivos `SKILL.md`).
@@ -181,6 +183,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
       delayBetweenTurnsMs: int(env, 'LOOP_DELAY_MS', 3000)
     },
     historyDir: str(env, 'HISTORY_DIR', join(process.cwd(), 'conversations')),
+    sessionsDir: str(env, 'SESSIONS_DIR', join(process.cwd(), 'conversations', '.sessions')),
     skills: {
       enabled: bool(env, 'SKILLS_ENABLED', true),
       cacheDir: str(env, 'SKILLS_CACHE_DIR', join(process.cwd(), '.skills-cache')),

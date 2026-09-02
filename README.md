@@ -50,7 +50,8 @@ ANTIGRAVITY_PROVIDER=openai npm start                  # terminal 2
 2. Escribe el **objetivo** y envíalo. (Atajo: escribir sin sesión crea una autónoma.)
 3. Observa los turnos: el panel muestra fase, agente activo y cada respuesta renderizada.
 4. **Pausar** detiene el ciclo tras el turno en curso; **Reanudar** lo continúa.
-5. El historial queda en `conversations/<proyecto>/<fecha>_<título>.md`.
+5. La pestaña **Archivos del workspace** muestra lo que van produciendo los agentes (informes Markdown, gráficos SVG/PNG, páginas HTML con d3, CSV) sin salir del panel.
+6. El historial legible queda en `conversations/<proyecto>/<fecha>_<título>.md`; el estado de cada sesión en `conversations/.sessions/<id>.json`, y **sobrevive a reinicios**: si el servidor cae en mitad de un ciclo, la sesión vuelve en pausa y puedes reanudarla.
 
 ### Modos de orquestación
 
@@ -98,7 +99,9 @@ turno 3   🏛️ Antigravity   REVIEW       VEREDICTO: REQUIERE_CAMBIOS → sig
 turno 4   💻 OpenCode      DEVELOPMENT  corrige…
 ```
 
-Los agentes se turnan en round‑robin en el orden del equipo. Cada uno recibe un prompt con: contexto de la sesión, instrucciones de su rol, el objetivo original y los últimos mensajes. El ciclo termina con la aprobación del arquitecto o al agotar los turnos.
+Los agentes se turnan en round‑robin en el orden del equipo. Cada uno recibe un prompt con: contexto de la sesión, instrucciones de su rol, sus skills, el objetivo original y los últimos mensajes. El ciclo termina con la aprobación del arquitecto o al agotar los turnos.
+
+En una revisión con `REQUIERE_CAMBIOS`, el arquitecto puede **pasar el turno directamente** a quien deba corregir con `[SIGUIENTE: aider]`; el round‑robin continúa desde ese agente. Sin la etiqueta, sigue el orden habitual.
 
 ## Configuración
 
@@ -116,6 +119,7 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 | `LOOP_MAX_TURNS` / `LOOP_DELAY_MS` | `15` / `3000` | Ciclo por defecto |
 | `SKILLS_SOURCES` | `anthropics/skills` | Repositorios de skills (`owner/repo[@ref]` o URL, separados por comas) |
 | `SKILLS_CACHE_DIR` / `SKILLS_SYNC_ON_START` | `./.skills-cache` / `true` | Dónde se clonan y si se actualizan al arrancar |
+| `HISTORY_DIR` / `SESSIONS_DIR` | `./conversations` / `./conversations/.sessions` | Historial `.md` y estado `.json` de las sesiones |
 
 ## Scripts
 
@@ -132,7 +136,7 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 
 ## API
 
-**REST**: `GET /api/health`, `/api/agents`, `/api/agents/status`, `/api/conversations`, `/api/conversations/:id`, `/api/phases`, `/api/skills`, `/api/skills/:name`; `POST /api/skills/sync` (vuelve a clonar/actualizar los repositorios de skills).
+**REST**: `GET /api/health`, `/api/agents`, `/api/agents/status`, `/api/conversations`, `/api/conversations/:id`, `/api/conversations/:id/files?dir=` (listado del workspace), `/api/conversations/:id/files/raw?path=` (contenido, solo lectura y confinado al workspace), `/api/phases`, `/api/skills`, `/api/skills/:name`; `POST /api/skills/sync` (vuelve a clonar/actualizar los repositorios de skills).
 
 **WebSocket** `/ws` — comandos del cliente: `create_conversation`, `start_loop`, `send_message`, `pause_loop`, `resume_loop`. Eventos del servidor: `connected`, `conversation_created`, `message`, `turn_change`, `phase_change`, `status`, `error`. Tipos exactos en [`src/types/index.ts`](src/types/index.ts).
 
@@ -157,8 +161,10 @@ src/
 │   ├── orchestrator.ts    Ciclo de turnos, estado, eventos
 │   ├── prompt-builder.ts  Prompt por rol y fase
 │   ├── phases.ts          Regla turno/agente → fase
-│   ├── verdict.ts         Parseo de VEREDICTO y [EQUIPO]
-│   └── history-writer.ts  Persistencia .md
+│   ├── verdict.ts         Parseo de VEREDICTO, [EQUIPO] y [SIGUIENTE]
+│   ├── history-writer.ts  Historial legible .md
+│   ├── session-store.ts   Estado .json por sesión (recuperación tras reinicio)
+│   └── workspace-files.ts Listado/lectura segura del workspace para el panel
 ├── skills/
 │   ├── skill-file.ts      Parseo/validación de SKILL.md (estándar Agent Skills)
 │   ├── skill-library.ts   Clona repos, indexa el catálogo, materializa en el workspace
@@ -174,7 +180,7 @@ src/
     ├── antigravity_bridge.py   Servidor OpenAI-compatible (Gemini o mock)
     └── interpreter_runner.py   Puente hacia el paquete Python de Open Interpreter
 skills/                    Skills incluidas (econometría, APIs financieras, d3.js)
-tests/                     node:test, 72 casos, sin dependencias externas
+tests/                     node:test, 85 casos, sin dependencias externas
 scripts/probe/             Sondas manuales contra herramientas reales + dobles (fake-llm, fake-openhands)
 docs/ARCHITECTURE.md       Decisiones de diseño y guía para extender
 ```
@@ -183,7 +189,7 @@ Para entender las decisiones de diseño y cómo añadir un agente, lee [`docs/AR
 
 ## Limitaciones conocidas
 
-- **Estado en memoria.** Las sesiones no sobreviven a un reinicio del servidor; el historial `.md` sí.
-- **Un servidor = un usuario.** No hay autenticación; está pensado para correr en tu máquina.
+- **Un servidor = un usuario.** No hay autenticación; está pensado para correr en tu máquina. El explorador de archivos expone (solo lectura) el workspace de cada sesión a quien pueda abrir el panel.
+- **Un ciclo interrumpido no se retoma a mitad de turno.** Si el servidor cae mientras un agente trabaja, ese turno se pierde (el estado del workspace puede quedar a medias); la sesión vuelve en pausa desde el último turno completado.
 - **Los agentes modifican archivos de verdad.** Usa un workspace bajo Git y revisa los diffs. OpenHands en modo headless auto‑aprueba todas sus acciones.
 - **Cuotas.** Con el free tier de Gemini, varios agentes compartiendo la misma key pueden dar `429`; el arquitecto reintenta con espera, el resto reporta el error y el ciclo continúa.

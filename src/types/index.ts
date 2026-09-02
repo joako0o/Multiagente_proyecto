@@ -151,6 +151,11 @@ export interface Conversation {
    * en el turno de planificación con `[SKILLS: …]` o el usuario al crear la sesión.
    */
   skills: Record<string, string[]>;
+  /**
+   * Agente que debe tomar el próximo turno, si el arquitecto lo indicó con
+   * `[SIGUIENTE: id]` en su revisión. Se consume al usarse; sin él, round-robin.
+   */
+  nextAgentId?: string;
   createdAt: Date;
   updatedAt: Date;
 }

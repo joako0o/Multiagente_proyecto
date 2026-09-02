@@ -71,6 +71,19 @@ def mock_reply(messages: list) -> str:
     lowered = last.lower()
 
     if "turno de **revisión**" in lowered or "veredicto" in lowered:
+        # En la primera revisión de una sesión pide una corrección a un agente concreto
+        # (demuestra [SIGUIENTE]); en las siguientes aprueba. Se detecta por el número de
+        # revisiones previas del arquitecto en el historial incluido en el prompt.
+        history = last.split("## Historial reciente", 1)[-1]  # solo mensajes previos, no las instrucciones
+        previous_reviews = history.count("VEREDICTO: REQUIERE_CAMBIOS")
+        next_agent = re.search(r"\[SIGUIENTE: id\]` \(ids: `([a-z0-9_-]+)`", last)
+        if previous_reviews == 0 and next_agent and os.environ.get("MOCK_REQUEST_CHANGES_FIRST", "1") == "1":
+            return (
+                "### Revisión\n\n"
+                "El trabajo va bien encaminado pero falta documentar cómo ejecutar las pruebas en el README.\n\n"
+                "VEREDICTO: REQUIERE_CAMBIOS\n"
+                f"[SIGUIENTE: {next_agent.group(1)}]"
+            )
         return (
             "### Revisión\n\n"
             "He revisado lo entregado por el equipo. La estructura es coherente con el plan y "

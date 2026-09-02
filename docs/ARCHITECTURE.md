@@ -34,8 +34,8 @@ Orchestrator.runLoop()
    ├─ buildPrompt()             core/prompt-builder.ts
    ├─ adapter.sendMessage(task) adapters/*.ts   ← única llamada "lenta"
    ├─ parseTeamSelection()      solo turno 0 + modo autónomo
-   ├─ parseVerdict()            solo arquitecto en REVIEW
-   ├─ addMessage() → emit message → HistoryWriter.save()
+   ├─ parseVerdict() + parseNextAgent()   solo arquitecto en REVIEW
+   ├─ addMessage() → emit message → persist() (.md + .json)
    └─ ¿APPROVED? → COMPLETED    ¿maxTurns? → COMPLETED    si no → siguiente turno
 ```
 
@@ -115,9 +115,16 @@ Ambas funciones son puras y están cubiertas por tests.
 
 ## 6. Persistencia
 
-`core/history-writer.ts` reescribe el `.md` completo de la conversación en cada cambio. Es síncrono y nunca lanza (un fallo de disco se registra y el ciclo sigue). Ruta: `conversations/<workspace>/<fecha>_<título>.md`.
+Dos escrituras por cada cambio, ambas desde `Orchestrator.persist()`:
 
-No hay base de datos a propósito: el objetivo del proyecto es una herramienta local y auditable, y el Markdown es legible sin tooling.
+- `core/history-writer.ts` — el `.md` **legible** (`conversations/<workspace>/<fecha>_<título>.md`). Para leerlo, compartirlo, versionarlo.
+- `core/session-store.ts` — el `.json` **recuperable** (`conversations/.sessions/<id>.json`, escritura atómica vía rename). Al arrancar, `Orchestrator.restore()` los carga; las sesiones que estaban `active` vuelven como `paused` con un mensaje de sistema, porque el bucle que las ejecutaba murió con el proceso. `reviveConversation()` rellena campos añadidos en versiones posteriores, así que los `.json` antiguos siguen cargando.
+
+No hay base de datos a propósito: las sesiones son pocas y pequeñas, y un archivo por sesión se inspecciona y borra a mano. Ambos escritores son síncronos y nunca lanzan (un fallo de disco se registra y el ciclo sigue).
+
+### Archivos del workspace
+
+`core/workspace-files.ts` da al panel acceso **de solo lectura** al workspace de una sesión. Toda ruta pasa por `resolveInsideWorkspace()`: se rechazan `..`, las rutas absolutas se tratan como relativas, y se compara el `realpath` final con el del workspace para que un enlace simbólico no permita salir. El HTML generado por los agentes se sirve con `Content-Security-Policy: sandbox` y el panel lo muestra en un `<iframe sandbox="allow-scripts">`, de modo que un gráfico d3 funciona pero no puede tocar el panel.
 
 ## 6b. Skills
 
@@ -186,7 +193,9 @@ tests/
 ├── interpreter.test.ts          lista blanca de comandos del fallback y parseo del runner
 ├── openhands-parser.test.ts     parseo JSONL
 ├── skills.test.ts               SKILL.md, biblioteca en disco, asignación y dossiers
-└── orchestrator.test.ts         ciclo completo con adaptadores falsos
+├── session-store.test.ts        guardar/recuperar, reinicio simulado y reanudación
+├── workspace-files.test.ts      listado, confinamiento de rutas (.., symlinks), MIME
+└── orchestrator.test.ts         ciclo completo con adaptadores falsos, [SIGUIENTE]
 ```
 
 Usan `node:test` (sin dependencias) y no tocan red ni herramientas externas. `npm test` corre en ~1 s. `scripts/test-e2e.js` es la prueba real de extremo a extremo y sí requiere credenciales.
@@ -195,6 +204,6 @@ Usan `node:test` (sin dependencias) y no tocan red ni herramientas externas. `np
 
 - **`autoStopOnError=false` en el servidor.** Un agente caído no debe matar la sesión: se registra un mensaje de sistema y el arquitecto decide. En tests se puede activar para detectar fallos.
 - **El arquitecto siempre está en el equipo** y siempre abre el ciclo. Sin él no hay plan ni veredicto, y el ciclo solo terminaría por `maxTurns`.
-- **Round‑robin simple** en vez de que el arquitecto elija quién habla en cada turno: es predecible, fácil de razonar y suficiente para equipos de 2–4 agentes. Si hiciera falta un enrutado dinámico, el sitio es `agentForTurn()`.
+- **Round‑robin con excepción explícita.** El orden base es predecible y fácil de razonar; el arquitecto solo lo altera con `[SIGUIENTE: id]` en una revisión con `REQUIERE_CAMBIOS`. `agentForTurn()` consume esa indicación una vez y **rota** `conversation.agents` para que el ciclo continúe desde el agente elegido (si no, el siguiente turno volvería a caer en quien iba antes). Con `APROBADO` la etiqueta se ignora porque el ciclo termina.
 - **Sin auto‑commits de Aider por defecto.** El usuario debe ver los diffs antes de que entren en el historial de Git.
 - **Timeouts largos para CLIs** (5–10 min): OpenHands y Aider pueden tardar mucho en tareas reales. Se ajustan por variable.

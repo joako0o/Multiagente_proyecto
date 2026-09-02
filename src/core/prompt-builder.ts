@@ -143,6 +143,7 @@ function architectPlanningInstructions(ctx: PromptContext, teammates: Agent[]): 
 }
 
 function architectReviewInstructions(teammates: Agent[]): string {
+  const ids = teammates.map(a => `\`${a.id}\``).join(', ');
   return [
     `Eres **Antigravity**, arquitecto y líder técnico. Este es un turno de **revisión**.`,
     `1. Evalúa con rigor lo entregado por el equipo (${teammates.map(a => a.name).join(', ')}): código, salidas de terminal y estado de git.`,
@@ -151,7 +152,9 @@ function architectReviewInstructions(teammates: Agent[]): string {
     ``,
     `Termina SIEMPRE con una única línea de veredicto:`,
     `- \`VEREDICTO: APROBADO\` si todo está completo y validado.`,
-    `- \`VEREDICTO: REQUIERE_CAMBIOS\` si falta algo (y detalla qué).`
+    `- \`VEREDICTO: REQUIERE_CAMBIOS\` si falta algo (y detalla qué).`,
+    ``,
+    `Opcional: si la corrección corresponde a un agente concreto, pásale el turno directamente añadiendo \`[SIGUIENTE: id]\` (ids: ${ids}). Sin esa etiqueta, el turno sigue el orden habitual.`
   ].join('\n');
 }
 
