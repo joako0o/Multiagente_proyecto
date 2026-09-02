@@ -102,13 +102,20 @@ export abstract class BaseCliAdapter implements AgentAdapter {
     }
 
     const answer = this.extractAnswer(result);
-    const header = `### ${this.displayName}\n\n` +
+    // Sin título: el panel y el historial ya muestran el nombre del agente.
+    const header =
       `- **Comando:** \`${[invocation.command, ...invocation.args.map(shortenArg)].join(' ')}\`\n` +
       `- **Workspace:** \`${task.projectPath}\`\n` +
       `- **Duración:** ${(result.durationMs / 1000).toFixed(1)} s · **Código de salida:** ${result.exitCode ?? 'n/a'}\n\n`;
 
     if (result.timedOut) {
       return header + `⏱️ **Tiempo agotado** tras ${this.timeoutMs / 1000} s. Salida parcial:\n\n` + fence(answer || result.stderr);
+    }
+
+    // Las subclases pueden convertir salidas conocidas en un aviso legible (empieza por ⚠️);
+    // en ese caso se muestra tal cual aunque el proceso haya fallado.
+    if (answer.startsWith('⚠️')) {
+      return header + answer;
     }
 
     if (result.exitCode !== 0) {
@@ -124,7 +131,7 @@ export abstract class BaseCliAdapter implements AgentAdapter {
   }
 
   private unavailableMessage(reason: string): string {
-    return `### ${this.displayName}\n\n⚠️ **Agente no disponible:** ${reason}\n\n` +
+    return `⚠️ **${this.displayName} no disponible:** ${reason}\n\n` +
       `_Este turno se salta. El arquitecto debe reasignar la tarea o el usuario debe instalar/configurar la herramienta._`;
   }
 }

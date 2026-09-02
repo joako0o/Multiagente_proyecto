@@ -10,6 +10,16 @@
  * La sesión se pasa con `?directory=<workspace>` para que OpenCode trabaje
  * sobre el proyecto correcto.
  *
+ * Verificado contra opencode 1.18.26 (OpenAPI en `GET /doc`): body
+ * `{model, parts}` con `parts` obligatorio, respuesta `{info, parts}`, partes
+ * `step-start | text | tool | step-finish | …`, y arranque automático con
+ * `spawn('opencode', ['serve', '--port', …], {detached: true})`.
+ *
+ * Proveedores: OpenCode toma los modelos de su propia configuración
+ * (`opencode auth login`, `opencode.json` del proyecto o `~/.config/opencode/`).
+ * `OPENCODE_PROVIDER`/`OPENCODE_MODEL` deben coincidir con un proveedor conectado;
+ * `GET /provider` (campo `connected`) lo muestra.
+ *
  * Documentación: https://opencode.ai/docs/server/
  */
 import { spawn } from 'child_process';
@@ -35,7 +45,16 @@ export class OpenCodeAdapter implements AgentAdapter {
   async getStatus(): Promise<AdapterStatus> {
     const health = await this.health();
     if (health.ok) {
-      return { available: true, mode: 'http', detail: `v${health.version ?? '?'} en ${this.config.url}` };
+      const connected = await this.connectedProviders();
+      if (connected && !connected.includes(this.config.providerID)) {
+        return {
+          available: false,
+          mode: 'http',
+          detail: `v${health.version} activo, pero el proveedor "${this.config.providerID}" no está conectado en OpenCode ` +
+            `(conectados: ${connected.join(', ') || 'ninguno'}). Ejecuta \`opencode auth login\` o ajusta OPENCODE_PROVIDER.`
+        };
+      }
+      return { available: true, mode: 'http', detail: `v${health.version ?? '?'} en ${this.config.url} · ${this.config.providerID}/${this.config.modelID}` };
     }
     return {
       available: false,
@@ -47,7 +66,7 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   async sendMessage(task: AgentTask): Promise<string> {
     if (!(await this.ensureRunning())) {
-      return `### 💻 OpenCode\n\n⚠️ **Servidor no disponible** en \`${this.config.url}\`.\n\n` +
+      return `⚠️ **OpenCode: servidor no disponible** en \`${this.config.url}\`.\n\n` +
         `Arranca OpenCode con \`opencode serve --port 4096\` y reanuda el ciclo.`;
     }
 
@@ -72,7 +91,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       }
     }
 
-    return `### 💻 OpenCode\n\n⚠️ **Error tras ${MAX_ATTEMPTS} intentos:** ${lastError}`;
+    return `⚠️ **OpenCode: error tras ${MAX_ATTEMPTS} intentos:** ${lastError}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -87,6 +106,18 @@ export class OpenCodeAdapter implements AgentAdapter {
       return { ok: true, version: body.version };
     } catch {
       return { ok: false };
+    }
+  }
+
+  /** Ids de proveedores con credenciales en OpenCode, o `undefined` si no se pudo consultar. */
+  private async connectedProviders(): Promise<string[] | undefined> {
+    try {
+      const response = await fetch(`${this.config.url}/provider`, { signal: AbortSignal.timeout(5000) });
+      if (!response.ok) return undefined;
+      const body = await response.json() as { connected?: string[] };
+      return Array.isArray(body.connected) ? body.connected : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -166,7 +197,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       if (providerError.data?.statusCode === 429) {
         throw new Error(`HTTP 429: ${message}`);
       }
-      return `### 💻 OpenCode\n\n⚠️ **Error del proveedor de modelo:** ${message}`;
+      return `⚠️ **OpenCode: error del proveedor de modelo:** ${message}`;
     }
 
     return formatParts(data.parts ?? []);

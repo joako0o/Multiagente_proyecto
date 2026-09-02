@@ -20,6 +20,10 @@ for (const [from, to] of directories) {
   const src = path.join(root, from);
   if (!fs.existsSync(src)) continue;
   fs.mkdirSync(path.join(root, to), { recursive: true });
-  fs.cpSync(src, path.join(root, to), { recursive: true, force: true });
+  fs.cpSync(src, path.join(root, to), {
+    recursive: true,
+    force: true,
+    filter: (source) => !/__pycache__|\.pyc$/.test(source)  // cachés de Python generadas al ejecutar los scripts
+  });
   console.log(`[copy-assets] ${from} → ${to}`);
 }

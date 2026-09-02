@@ -20,11 +20,13 @@ Orquestador **multi-agente por turnos** para desarrollo de software. Un agente a
 |---|---|---|---|---|
 | 🏛️ | **Antigravity** | Arquitecto y revisor. Abre cada sesión con un plan, reparte tareas y cierra con `VEREDICTO: APROBADO` o `REQUIERE_CAMBIOS`. | API de Gemini, o cualquier endpoint OpenAI‑compatible (Ollama, LM Studio, bridge incluido). | Solo una API key |
 | 💻 | **OpenCode** | Desarrollador principal. | Servidor HTTP local (`opencode serve`). | [opencode.ai](https://opencode.ai) |
-| 🤖 | **OpenHands** | Ingeniero autónomo de punta a punta (explora, edita, ejecuta, corrige). | CLI headless con salida JSONL. | `uv tool install openhands` |
+| 🤖 | **OpenHands** | Ingeniero autónomo de punta a punta (explora, edita, ejecuta, corrige). | CLI headless con salida JSONL. | `uv tool install openhands --python 3.12` |
 | 🐙 | **Aider** | Editor quirúrgico orientado a Git. | CLI en modo `--message-file`. | `pip install aider-install && aider-install` |
-| ⚡ | **Open Interpreter** | Ejecución y QA en el entorno real. | CLI `interpreter exec`. **Si no está instalado, funciona en modo limitado**: ejecuta los comandos de test/build que el equipo proponga. | [openinterpreter.com](https://www.openinterpreter.com/docs/terminal/install) |
+| ⚡ | **Open Interpreter** | Ejecución y QA en el entorno real. | Paquete Python vía `interpreter_runner.py` (o el binario nuevo con `interpreter exec`). **Si no está instalado, funciona en modo limitado**: ejecuta los comandos de test/build que el equipo proponga. | `pip install open-interpreter` |
 
 Solo Antigravity es obligatorio. El resto se detecta al arrancar; el panel muestra qué agentes están disponibles y por qué no lo están los demás.
+
+Las integraciones están verificadas contra versiones reales (Aider 0.86.2, Open Interpreter 0.4.3, OpenCode 1.18.26, OpenHands 1.16.0); el detalle está en [`scripts/probe/README.md`](scripts/probe/README.md), junto con una receta para probar el ciclo completo sin credenciales.
 
 ## Inicio rápido
 
@@ -77,7 +79,8 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 | `ANTIGRAVITY_PROVIDER` | `gemini` | `gemini` o `openai` (endpoint compatible) |
 | `ANTIGRAVITY_MODEL` | `gemini-2.5-flash` | Modelo del arquitecto |
 | `OPENCODE_URL` | `http://127.0.0.1:4096` | Servidor OpenCode; se auto‑arranca si `OPENCODE_AUTO_START=true` |
-| `OPENHANDS_MODEL` / `AIDER_MODEL` | `gemini/gemini-2.5-flash` si hay key | Modelo en formato LiteLLM |
+| `OPENHANDS_MODEL` / `AIDER_MODEL` / `INTERPRETER_MODEL` | `gemini/gemini-2.5-flash` si hay key | Modelo en formato LiteLLM |
+| `INTERPRETER_PYTHON` | `python3` | Python donde está instalado `open-interpreter` (p. ej. un venv) |
 | `AIDER_AUTO_COMMITS` | `false` | Si Aider hace commit automático |
 | `LOOP_MAX_TURNS` / `LOOP_DELAY_MS` | `15` / `3000` | Ciclo por defecto |
 
@@ -92,6 +95,7 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 | `npm run typecheck` | Chequeo estricto de tipos (src + tests) |
 | `npm run test:e2e` | Ciclo real por WebSocket contra el servidor compilado |
 | `npm run bridge` | Servidor Python OpenAI‑compatible (Gemini o mock) |
+| `scripts/probe/*` | Sondas manuales de cada adaptador contra la herramienta real ([guía](scripts/probe/README.md)) |
 
 ## API
 
@@ -128,8 +132,11 @@ src/
 │   └── websocket-server.ts
 ├── utils/                 shell (procesos externos), paths
 ├── web/                   Panel: index.html, styles.css, app.js (sin framework)
-└── scripts/antigravity_bridge.py
-tests/                     node:test, ~45 casos, sin dependencias externas
+└── scripts/
+    ├── antigravity_bridge.py   Servidor OpenAI-compatible (Gemini o mock)
+    └── interpreter_runner.py   Puente hacia el paquete Python de Open Interpreter
+tests/                     node:test, 50 casos, sin dependencias externas
+scripts/probe/             Sondas manuales contra herramientas reales + dobles (fake-llm, fake-openhands)
 docs/ARCHITECTURE.md       Decisiones de diseño y guía para extender
 ```
 

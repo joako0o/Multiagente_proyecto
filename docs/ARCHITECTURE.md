@@ -84,8 +84,17 @@ La subclase solo implementa `buildInvocation(task)` (qué ejecutar) y opcionalme
 | OpenCode | HTTP `POST /session/:id/message` con `?directory=` | CLI `opencode run`: menos control de sesión; el servidor es la interfaz oficial para clientes. |
 | OpenHands | `openhands --headless --json -f task.md` | SDK Python: obligaría a un proceso puente. El CLI headless está diseñado para automatización y el JSONL da trazabilidad de acciones. |
 | Aider | `aider --message-file task.md --yes-always --no-stream` | API Python (`Coder.create`): misma razón. `--message-file` evita límites de longitud de argumentos. |
-| Open Interpreter | `interpreter exec … -` (prompt por stdin) | El paquete Python antiguo (`interpreter.chat`) está obsoleto; el CLI actual expone `exec` para uso no interactivo. |
+| Open Interpreter | Paquete Python vía `scripts/interpreter_runner.py` (`interpreter.chat()` con `auto_run`); binario nuevo vía `interpreter exec -` si es lo que hay instalado | El CLI del paquete Python (`interpreter --stdin`) lee una sola línea con `input()` y trunca prompts multilínea. El runner recibe el prompt completo por stdin y devuelve JSON limpio (la salida del paquete se redirige a stderr). |
 | Antigravity | REST directo a Gemini u OpenAI‑compatible | Ninguna dependencia de SDK: `fetch` nativo basta y se cambia de proveedor con una variable. |
+
+### Qué se verificó y cómo
+
+Cada adaptador se contrastó con la herramienta real o con su código fuente (ver `scripts/probe/README.md`):
+
+- **Aider 0.86.2** — ejecutado de verdad contra un LLM falso: aplica ediciones, y descubrimos que sin `--no-auto-lint` reintenta con el LLM por cada error de lint (varias rondas por turno) y que escribe `.aider.*` en el workspace (se redirigen a `/tmp` y se excluyen vía `.git/info/exclude`).
+- **Open Interpreter 0.4.3** — ejecutado de verdad: `interpreter.chat()` devuelve mensajes `{role, type, format, content}`; los de `format: "active_line"` son ruido de UI y se filtran.
+- **OpenCode 1.18.26** — servidor real; el esquema OpenAPI (`GET /doc`) confirma `POST /session/:id/message {model, parts}` → `{info, parts}` y `?directory=`. El auto‑arranque con `detached: true` sobrevive al proceso padre.
+- **OpenHands 1.16.0** — no se pudo ejecutar (exige Python 3.12 exacto); se leyó el wheel: los siete flags existen, el JSONL usa `kind` como discriminador (`ActionEvent`/`ObservationEvent`/`MessageEvent`) y, sin settings guardados, imprime "Headless mode requires existing settings" **con código de salida 0** — por eso el adaptador detecta ese texto en vez de fiarse del exit code.
 
 ## 4. Prompts
 
@@ -153,7 +162,7 @@ tests/
 ├── phases.test.ts               regla de fases
 ├── prompt-builder.test.ts       contenido del prompt por rol/modo
 ├── config.test.ts               defaults y precedencia de variables
-├── interpreter-fallback.test.ts lista blanca de comandos
+├── interpreter.test.ts          lista blanca de comandos del fallback y parseo del runner
 ├── openhands-parser.test.ts     parseo JSONL
 └── orchestrator.test.ts         ciclo completo con adaptadores falsos
 ```

@@ -60,7 +60,7 @@ export class AntigravityAdapter implements AgentAdapter {
   async sendMessage(task: AgentTask): Promise<string> {
     const status = await this.getStatus();
     if (!status.available) {
-      return `### 🏛️ Antigravity\n\n⚠️ **No configurado:** ${status.detail}`;
+      return `⚠️ **Antigravity no configurado:** ${status.detail}`;
     }
 
     let lastError = '';
@@ -82,7 +82,7 @@ export class AntigravityAdapter implements AgentAdapter {
       }
     }
 
-    return `### 🏛️ Antigravity\n\n⚠️ **No se pudo obtener respuesta del modelo** (${lastError}).\n\n` +
+    return `⚠️ **Antigravity: no se pudo obtener respuesta del modelo** (${lastError}).\n\n` +
       `_Si es un límite de cuota (HTTP 429), espera unos segundos y reanuda el ciclo._`;
   }
 

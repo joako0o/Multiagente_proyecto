@@ -50,15 +50,33 @@ export interface AppConfig {
   /** Aider = CLI en modo `--message-file`. */
   aider: {
     command: string;
+    /** Formato LiteLLM: `gemini/gemini-2.5-flash`, `openai/gpt-4o`, `ollama/qwen2.5-coder`… */
     model: string;
+    /** Formato de aider: `proveedor=clave`, p. ej. `gemini=AIza…`. Vacío = usa el entorno del sistema. */
+    apiKey: string;
+    /** Base URL para modelos `openai/…` (Ollama, LM Studio, bridge). */
+    baseUrl: string;
     autoCommits: boolean;
     timeoutMs: number;
   };
 
-  /** Open Interpreter = CLI `interpreter exec`. */
+  /**
+   * Open Interpreter. Se soportan el paquete Python (`pip install open-interpreter`,
+   * vía `src/scripts/interpreter_runner.py`) y el binario nuevo (`interpreter exec`).
+   */
   interpreter: {
+    /** Intérprete de Python donde está instalado `open-interpreter`. */
+    python: string;
+    /** Binario nuevo (solo si no se usa el paquete Python). */
     command: string;
+    /** Formato LiteLLM: `gemini/gemini-2.5-flash`, `openai/…`, `ollama/…`. */
     model: string;
+    /** Base URL para modelos `openai/…` contra servidores locales. */
+    apiBase: string;
+    apiKey: string;
+    /** Evita el aviso "unable to determine context window" con modelos desconocidos. */
+    contextWindow: number;
+    maxTokens: number;
     timeoutMs: number;
   };
 
@@ -127,12 +145,19 @@ export function loadConfig(env: Env = process.env): AppConfig {
     aider: {
       command: str(env, 'AIDER_COMMAND', 'aider'),
       model: str(env, 'AIDER_MODEL', geminiKey ? 'gemini/gemini-2.5-flash' : ''),
+      apiKey: str(env, 'AIDER_API_KEY', geminiKey ? `gemini=${geminiKey}` : ''),
+      baseUrl: str(env, 'AIDER_BASE_URL', ''),
       autoCommits: bool(env, 'AIDER_AUTO_COMMITS', false),
       timeoutMs: int(env, 'AIDER_TIMEOUT_MS', 300_000)
     },
     interpreter: {
+      python: str(env, 'INTERPRETER_PYTHON', process.platform === 'win32' ? 'python' : 'python3'),
       command: str(env, 'INTERPRETER_COMMAND', 'interpreter'),
-      model: str(env, 'INTERPRETER_MODEL', ''),
+      model: str(env, 'INTERPRETER_MODEL', geminiKey ? 'gemini/gemini-2.5-flash' : ''),
+      apiBase: str(env, 'INTERPRETER_API_BASE', ''),
+      apiKey: str(env, 'INTERPRETER_API_KEY', geminiKey),
+      contextWindow: int(env, 'INTERPRETER_CONTEXT_WINDOW', 128_000),
+      maxTokens: int(env, 'INTERPRETER_MAX_TOKENS', 4_096),
       timeoutMs: int(env, 'INTERPRETER_TIMEOUT_MS', 300_000)
     },
     loop: {

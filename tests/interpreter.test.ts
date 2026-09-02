@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractVerificationCommands } from '../src/adapters/interpreter';
+import { extractVerificationCommands, formatRunnerMessages, parseRunnerOutput } from '../src/adapters/interpreter';
 
 describe('extractVerificationCommands', () => {
   test('extrae comandos de bloques bash', () => {
@@ -36,5 +36,40 @@ describe('extractVerificationCommands', () => {
 
   test('devuelve vacío si no hay bloques de código', () => {
     assert.deepEqual(extractVerificationCommands('Ejecuta npm test por favor'), []);
+  });
+});
+
+describe('parseRunnerOutput / formatRunnerMessages', () => {
+  // Formas reales devueltas por open-interpreter 0.4.3 vía interpreter_runner.py
+  const sample = {
+    version: '0.4.3',
+    messages: [
+      { role: 'assistant', type: 'message', format: null, content: 'Voy a ejecutar las pruebas.\n\n' },
+      { role: 'assistant', type: 'code', format: 'shell', content: '\nnpm test\n' },
+      { role: 'computer', type: 'console', format: 'output', content: '\n1 passing\n' },
+      { role: 'assistant', type: 'message', format: null, content: 'Todo en verde.' }
+    ]
+  };
+
+  test('toma la última línea JSON aunque haya ruido antes', () => {
+    const out = parseRunnerOutput('aviso del paquete\notra línea\n' + JSON.stringify(sample) + '\n');
+    assert.equal(out?.version, '0.4.3');
+    assert.equal(out?.messages?.length, 4);
+  });
+
+  test('devuelve undefined si no hay JSON', () => {
+    assert.equal(parseRunnerOutput('Traceback (most recent call last)…'), undefined);
+  });
+
+  test('formatea texto, código y salida de consola como Markdown', () => {
+    const md = formatRunnerMessages(sample.messages);
+    assert.match(md, /^Voy a ejecutar las pruebas\./);
+    assert.match(md, /\*\*Ejecuta\*\* \(shell\):\n```shell\nnpm test\n```/);
+    assert.match(md, /\*\*Salida:\*\*\n```text\n1 passing\n```/);
+    assert.match(md, /Todo en verde\.$/);
+  });
+
+  test('sin mensajes útiles devuelve un aviso', () => {
+    assert.match(formatRunnerMessages([{ role: 'assistant', type: 'message', content: '   ' }]), /sin producir mensajes/);
   });
 });

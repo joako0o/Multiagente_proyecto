@@ -11,6 +11,15 @@
  * - `-f` lee la tarea de un archivo (evita límites de longitud de argumentos).
  * - `--override-with-envs` hace que respete LLM_MODEL / LLM_API_KEY / LLM_BASE_URL.
  *
+ * Comportamientos verificados leyendo el código de openhands 1.16 (flags,
+ * esquema de eventos del SDK y manejo de settings); no se pudo ejecutar el
+ * binario en este entorno (requiere Python 3.12):
+ * - Sin settings guardados (`~/.openhands/agent_settings.json`) y sin
+ *   `--override-with-envs`, el CLI imprime "Headless mode requires existing
+ *   settings" y termina con código 0 → hay que detectarlo por texto.
+ * - Con `--override-with-envs` y sin settings, exige LLM_API_KEY y LLM_MODEL
+ *   a la vez (`MissingEnvironmentVariablesError`, código 1).
+ *
  * Documentación: https://docs.openhands.dev/openhands/usage/cli/command-reference
  */
 import { mkdtempSync, writeFileSync } from 'fs';
@@ -49,7 +58,24 @@ export class OpenHandsAdapter extends BaseCliAdapter {
     return { command: this.config.command, args, env };
   }
 
+  protected configurationProblem(): string | undefined {
+    // Con modelo explícito, OpenHands exige también la clave (salvo que ya tenga settings guardados,
+    // pero no podemos saberlo sin ejecutarlo; pedirla evita un fallo confuso en mitad del ciclo).
+    if (this.config.model && !this.config.apiKey) {
+      return 'OPENHANDS_MODEL está definido pero falta OPENHANDS_API_KEY (o GEMINI_API_KEY)';
+    }
+    return undefined;
+  }
+
   protected extractAnswer(result: RunResult): string {
+    const combined = result.stdout + '\n' + result.stderr;
+    if (/Headless mode requires existing settings/i.test(combined)) {
+      return '⚠️ OpenHands no tiene configuración guardada. Opciones: ejecutar `openhands` una vez de forma interactiva ' +
+        'para configurar el modelo, o definir OPENHANDS_MODEL y OPENHANDS_API_KEY en `.env` para que el bridge lo configure por entorno.';
+    }
+    if (/Missing required environment variable/i.test(combined)) {
+      return '⚠️ OpenHands requiere LLM_API_KEY y LLM_MODEL a la vez cuando se configura por entorno. Revisa OPENHANDS_MODEL / OPENHANDS_API_KEY en `.env`.';
+    }
     return parseOpenHandsJsonl(result.stdout) || result.stdout.trim();
   }
 }
@@ -58,13 +84,28 @@ export class OpenHandsAdapter extends BaseCliAdapter {
 // Parseo de la salida JSONL
 // -----------------------------------------------------------------------------
 
+/**
+ * Subconjunto de los eventos que emite `openhands --headless --json`.
+ * Verificado contra openhands 1.16 / openhands-sdk: el discriminador es `kind`
+ * (nombre de la clase Pydantic) y cada acción va anidada en `action`.
+ */
 interface OpenHandsEvent {
-  kind?: string;
-  source?: string;
+  kind?: 'MessageEvent' | 'ActionEvent' | 'ObservationEvent' | 'AgentErrorEvent' | string;
+  source?: 'user' | 'agent' | 'environment' | string;
   tool_name?: string;
-  action?: { kind?: string; message?: string; command?: string; path?: string; [key: string]: unknown };
+  action?: {
+    kind?: 'TerminalAction' | 'FileEditorAction' | 'FinishAction' | string;
+    /** FinishAction: mensaje final para el usuario. */
+    message?: string;
+    /** TerminalAction: comando de shell. FileEditorAction: subcomando (view/create/str_replace…). */
+    command?: string;
+    /** FileEditorAction: ruta del archivo. */
+    path?: string;
+  };
   observation?: { is_error?: boolean };
-  llm_message?: { content?: Array<{ text?: string }> };
+  /** AgentErrorEvent */
+  error?: string;
+  llm_message?: { role?: string; content?: Array<{ type?: string; text?: string }> };
 }
 
 /**
@@ -94,16 +135,21 @@ export function parseOpenHandsJsonl(output: string): string {
     if (event.kind === 'MessageEvent' && event.source === 'agent') {
       const text = event.llm_message?.content?.map(c => c.text ?? '').join('').trim();
       if (text) agentMessages.push(text);
-    } else if (event.kind === 'ActionEvent') {
-      if (event.action?.kind === 'FinishAction') {
-        finalMessage = String(event.action.message ?? '').trim();
-      } else if (event.action?.command) {
-        actions.push(`- 🖥️ \`${String(event.action.command).slice(0, 120)}\``);
-      } else if (event.action?.path) {
-        actions.push(`- 📝 \`${event.action.path}\` (${event.tool_name ?? event.action.kind ?? 'edición'})`);
+    } else if (event.kind === 'ActionEvent' && event.action) {
+      const { kind, message, command, path } = event.action;
+      if (kind === 'FinishAction') {
+        finalMessage = String(message ?? '').trim();
+      } else if (path) {
+        // FileEditorAction también tiene `command` (view/create/str_replace…), por eso `path` se mira primero.
+        actions.push(`- 📝 \`${path}\` (${command ?? event.tool_name ?? 'edición'})`);
+      } else if (command) {
+        actions.push(`- 🖥️ \`${String(command).slice(0, 120)}\``);
       }
     } else if (event.kind === 'ObservationEvent' && event.observation?.is_error) {
       errors++;
+    } else if (event.kind === 'AgentErrorEvent' && event.error) {
+      errors++;
+      agentMessages.push(`⚠️ Error del agente: ${event.error}`);
     }
   }
 
