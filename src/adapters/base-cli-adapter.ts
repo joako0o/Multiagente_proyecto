@@ -91,7 +91,9 @@ export abstract class BaseCliAdapter implements AgentAdapter {
         cwd: task.projectPath,
         input: invocation.input,
         env: invocation.env,
-        timeoutMs: this.timeoutMs
+        timeoutMs: this.timeoutMs,
+        signal: task.signal,
+        onOutput: task.onProgress ? (chunk) => task.onProgress!(chunk) : undefined
       });
     } catch (err) {
       if (err instanceof CommandNotFoundError) {
@@ -107,6 +109,10 @@ export abstract class BaseCliAdapter implements AgentAdapter {
       `- **Comando:** \`${[invocation.command, ...invocation.args.map(shortenArg)].join(' ')}\`\n` +
       `- **Workspace:** \`${task.projectPath}\`\n` +
       `- **Duración:** ${(result.durationMs / 1000).toFixed(1)} s · **Código de salida:** ${result.exitCode ?? 'n/a'}\n\n`;
+
+    if (result.aborted) {
+      return header + `⏹️ **Turno detenido por el usuario.** Salida hasta ese momento:\n\n` + fence(truncateMiddle(answer || result.stderr || '(sin salida)', MAX_ANSWER_CHARS));
+    }
 
     if (result.timedOut) {
       return header + `⏱️ **Tiempo agotado** tras ${this.timeoutMs / 1000} s. Salida parcial:\n\n` + fence(answer || result.stderr);

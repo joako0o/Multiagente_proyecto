@@ -10,9 +10,11 @@ import { spawn } from 'child_process';
 export interface RunResult {
   stdout: string;
   stderr: string;
-  /** Código de salida, o `null` si el proceso fue matado por timeout. */
+  /** Código de salida, o `null` si el proceso fue matado (timeout o cancelación). */
   exitCode: number | null;
   timedOut: boolean;
+  /** `true` si se detuvo porque el `signal` de las opciones se disparó. */
+  aborted: boolean;
   durationMs: number;
 }
 
@@ -25,6 +27,10 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Límite de bytes retenidos por stream para no agotar memoria con salidas enormes. */
   maxOutputBytes?: number;
+  /** Si se dispara, el proceso se mata (SIGTERM, luego SIGKILL) y `aborted` queda a `true`. */
+  signal?: AbortSignal;
+  /** Recibe cada fragmento de salida según llega (para mostrar progreso en vivo). */
+  onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void;
 }
 
 /** Error lanzado cuando el ejecutable no existe en el PATH. */
@@ -45,42 +51,73 @@ const isWindows = process.platform === 'win32';
  * requieren shell; por eso allí sí se usa `shell: true`.
  */
 export function run(command: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
-  const { cwd, input, env, timeoutMs = 120_000, maxOutputBytes = 2_000_000 } = options;
+  const { cwd, input, env, timeoutMs = 120_000, maxOutputBytes = 2_000_000, signal, onOutput } = options;
   const startedAt = Date.now();
 
   return new Promise<RunResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      resolve({ stdout: '', stderr: '', exitCode: null, timedOut: false, aborted: true, durationMs: 0 });
+      return;
+    }
+
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, ...env },
       shell: isWindows,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // En Unix, el hijo lidera su propio grupo de procesos: así al detenerlo
+      // podemos matar también a sus nietos (p. ej. el `sleep` de un script que
+      // lanzó Open Interpreter), que de otro modo quedarían huérfanos.
+      detached: !isWindows
     });
 
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let aborted = false;
     let settled = false;
+
+    /** Mata el árbol completo: SIGTERM al grupo y, si no muere en 3 s, SIGKILL. */
+    const terminate = () => {
+      killTree(child.pid, 'SIGTERM');
+      setTimeout(() => killTree(child.pid, 'SIGKILL'), 3000).unref();
+    };
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
-      // Si SIGTERM no basta (p. ej. procesos hijos colgados), forzamos.
-      setTimeout(() => child.kill('SIGKILL'), 3000).unref();
+      terminate();
     }, timeoutMs);
+
+    const onAbort = () => {
+      aborted = true;
+      terminate();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
 
     const append = (current: string, chunk: Buffer): string => {
       if (current.length >= maxOutputBytes) return current;
       return (current + chunk.toString('utf-8')).slice(0, maxOutputBytes);
     };
 
-    child.stdout.on('data', (chunk: Buffer) => { stdout = append(stdout, chunk); });
-    child.stderr.on('data', (chunk: Buffer) => { stderr = append(stderr, chunk); });
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout = append(stdout, chunk);
+      onOutput?.(chunk.toString('utf-8'), 'stdout');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = append(stderr, chunk);
+      onOutput?.(chunk.toString('utf-8'), 'stderr');
+    });
 
     child.on('error', (err: NodeJS.ErrnoException) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      cleanup();
       if (err.code === 'ENOENT') {
         reject(new CommandNotFoundError(command));
       } else {
@@ -91,8 +128,8 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
     child.on('close', (code) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode: code, timedOut, durationMs: Date.now() - startedAt });
+      cleanup();
+      resolve({ stdout, stderr, exitCode: code, timedOut, aborted, durationMs: Date.now() - startedAt });
     });
 
     if (input !== undefined) {
@@ -102,6 +139,26 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
       child.stdin.end();
     }
   });
+}
+
+/**
+ * Envía una señal a un proceso y a todos sus descendientes.
+ * - Unix: el hijo se lanzó con `detached`, así que es líder de grupo y basta
+ *   con señalar al grupo (`-pid`).
+ * - Windows: `taskkill /T` recorre el árbol.
+ * Nunca lanza (el proceso puede haber terminado ya).
+ */
+export function killTree(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (!pid) return;
+  try {
+    if (isWindows) {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => { /* ignorar */ });
+    } else {
+      process.kill(-pid, signal);
+    }
+  } catch {
+    try { process.kill(pid, signal); } catch { /* ya terminó */ }
+  }
 }
 
 /**

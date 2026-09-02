@@ -128,7 +128,10 @@ function handleServerEvent(event) {
       break;
 
     case 'message':
-      if (isCurrent) appendMessage(event.data);
+      if (isCurrent) {
+        if (event.data.role === 'agent') hideLiveOutput();
+        appendMessage(event.data);
+      }
       if (event.data.role === 'agent') log(`${agentName(event.data.agentId)} respondió`, 'info');
       // El arquitecto puede haber asignado skills o redefinido el equipo: refrescamos la cabecera.
       if (isCurrent && event.data.role === 'system') refreshSessionHeader();
@@ -139,8 +142,21 @@ function handleServerEvent(event) {
       if (isCurrent) {
         setPhase(event.data.phase);
         $('turnInfo').textContent = `Turno: ${event.data.turn + 1} / ${state.currentMaxTurns} · ${event.data.agentName} trabajando…`;
+        showLiveOutput(event.data.agentId, event.data.agentName);
+        updateButtons();
       }
       log(`Turno ${event.data.turn + 1}: ${event.data.agentName} (${PHASE_LABELS[event.data.phase] || event.data.phase})`);
+      break;
+
+    case 'turn_output':
+      if (isCurrent) appendLiveOutput(event.data.chunk);
+      break;
+
+    case 'conversation_deleted':
+      state.conversations = state.conversations.filter(c => c.id !== event.data.id);
+      if (state.currentId === event.data.id) resetChatView();
+      renderConversations();
+      log('Sesión eliminada', 'info');
       break;
 
     case 'phase_change':
@@ -154,6 +170,7 @@ function handleServerEvent(event) {
         state.currentStatus = event.data.status;
         $('turnInfo').textContent = `Turno: ${event.data.turns} / ${state.currentMaxTurns}`;
         setPhase(event.data.phase);
+        if (event.data.status !== 'active') hideLiveOutput();
         updateButtons();
       }
       if (event.data.status === 'completed') log('Ciclo finalizado', 'ok');
@@ -488,7 +505,8 @@ async function openConversation(id) {
     renderSessionSkills(conv.skills);
 
     const container = $('messages');
-    container.innerHTML = '';
+    for (const el of [...container.children]) if (el.id !== 'liveOutput') el.remove();
+    hideLiveOutput();
     conv.messages.forEach(appendMessage);
 
     state.filesDir = '';
@@ -515,11 +533,65 @@ function updateButtons() {
   const status = state.currentStatus;
   $('pauseBtn').disabled = !hasSession || status !== 'active';
   $('resumeBtn').disabled = !hasSession || status !== 'paused';
+  // "Detener" solo tiene sentido mientras un agente está trabajando (caja de salida en vivo visible).
+  $('stopTurnBtn').disabled = !hasSession || $('liveOutput').hidden;
+  $('deleteBtn').disabled = !hasSession;
   $('messageInput').placeholder = !hasSession || status === 'completed'
     ? 'Describe un objetivo… (se creará una sesión autónoma nueva)'
     : status === 'idle' ? 'Describe el objetivo para iniciar el ciclo…'
     : 'Añadir una nota al contexto del equipo…';
 }
+
+/* --- Salida en vivo del agente en curso ---------------------------------- */
+
+const LIVE_MAX_CHARS = 20_000;
+
+function showLiveOutput(agentId, agentName) {
+  const box = $('liveOutput');
+  $('emptyState')?.remove();
+  $('liveTitle').textContent = `${agentName} trabajando…`;
+  $('liveText').textContent = '';
+  box.dataset.agent = agentId;
+  box.hidden = false;
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+
+function appendLiveOutput(chunk) {
+  const box = $('liveOutput');
+  if (box.hidden) return;
+  const pre = $('liveText');
+  let text = pre.textContent + chunk;
+  if (text.length > LIVE_MAX_CHARS) text = '…' + text.slice(-LIVE_MAX_CHARS);
+  pre.textContent = text;
+  pre.scrollTop = pre.scrollHeight;
+  $('stopTurnBtn').disabled = false;
+}
+
+function hideLiveOutput() {
+  $('liveOutput').hidden = true;
+  $('stopTurnBtn').disabled = true;
+}
+
+/** Vuelve al estado "sin sesión" (tras eliminar la actual). */
+function resetChatView() {
+  state.currentId = null;
+  state.currentStatus = 'idle';
+  $('conversationTitle').textContent = 'Selecciona o crea una sesión';
+  $('workspaceInfo').textContent = 'Workspace: —';
+  $('modeInfo').textContent = 'Modo: —';
+  $('turnInfo').textContent = 'Turno: —';
+  $('phaseBadge').textContent = '—';
+  delete $('phaseBadge').dataset.phase;
+  renderSessionSkills({});
+  hideLiveOutput();
+  const container = $('messages');
+  for (const el of [...container.children]) if (el.id !== 'liveOutput') el.remove();
+  container.insertBefore(EMPTY_STATE_TEMPLATE.cloneNode(true), $('liveOutput'));
+  updateButtons();
+}
+
+/** Copia del bloque de ayuda inicial, para poder restaurarlo tras eliminar una sesión. */
+const EMPTY_STATE_TEMPLATE = $('emptyState').cloneNode(true);
 
 /* --- Mensajes ----------------------------------------------------------- */
 
@@ -548,7 +620,7 @@ function appendMessage(message) {
     </header>
     <div class="message-content">${html}</div>`;
 
-  container.appendChild(article);
+  container.insertBefore(article, $('liveOutput'));
   container.scrollTop = container.scrollHeight;
 }
 
@@ -758,6 +830,17 @@ function resumeLoop() {
   send({ type: 'resume_loop', data: { conversationId: state.currentId } });
 }
 
+function stopTurn() {
+  send({ type: 'stop_turn', data: { conversationId: state.currentId } });
+}
+
+function deleteConversation() {
+  const conv = state.conversations.find(c => c.id === state.currentId);
+  if (!conv) return;
+  if (!confirm(`¿Eliminar la sesión "${conv.title}"?\n\nSe borra del panel; el historial .md en conversations/ se conserva.`)) return;
+  send({ type: 'delete_conversation', data: { conversationId: state.currentId } });
+}
+
 /* ========================================================================
    5. Arranque
    ======================================================================== */
@@ -769,6 +852,8 @@ $('sessionMode').addEventListener('change', (e) => { $('teamField').hidden = e.t
 $('composer').addEventListener('submit', submitComposer);
 $('pauseBtn').addEventListener('click', pauseLoop);
 $('resumeBtn').addEventListener('click', resumeLoop);
+$('stopTurnBtn').addEventListener('click', stopTurn);
+$('deleteBtn').addEventListener('click', deleteConversation);
 $('refreshStatusBtn').addEventListener('click', refreshAgentStatus);
 $('chatTabs').addEventListener('click', (e) => { const btn = e.target.closest('.tab'); if (btn) setTab(btn.dataset.tab); });
 $('refreshFilesBtn').addEventListener('click', loadFiles);

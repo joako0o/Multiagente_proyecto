@@ -47,8 +47,11 @@ Orchestrator.runLoop()
                    └──── aprobado / maxTurns / error ───┴──► completed (o paused si error)
 ```
 
-- `pauseLoop()` **no interrumpe** el turno en curso (no se puede cancelar una CLI a medias de forma segura); marca `paused` y el bucle no inicia otro turno.
+- `pauseLoop()` **no interrumpe** el turno en curso; marca `paused` y el bucle no inicia otro turno.
+- `stopTurn()` **sí interrumpe**: dispara el `AbortController` del turno. Cada `AgentTask` lleva ese `signal`; los adaptadores de CLI lo pasan a `run()`, que mata el **árbol** de procesos (el hijo se lanza `detached` como líder de grupo y se señala a `-pid`; en Windows `taskkill /T`), y los HTTP cancelan el `fetch` (OpenCode además llama a `POST /session/:id/abort` para que el servidor deje de trabajar). La respuesta parcial se guarda como mensaje normal y el turno cuenta como ejecutado.
 - `resumeLoop()` mientras el turno en curso sigue vivo simplemente cancela la pausa. Si el bucle ya terminó, lo relanza. Nunca hay dos bucles para la misma conversación: lo garantiza el `Set` `running`.
+- `deleteConversation()` aborta el turno si lo hay, borra memoria y `.json`, y emite `conversation_deleted`. `runLoop()` comprueba tras cada turno que la conversación siga existiendo.
+- `shutdown()` (llamado desde `BridgeServer.stop()`) aborta todos los turnos en curso; como los procesos hijos son líderes de grupo, sin esto sobrevivirían al servidor.
 
 ## 3. Contrato de un adaptador
 
@@ -62,6 +65,7 @@ interface AgentAdapter {
 
 Reglas que cumplen todos los adaptadores:
 
+0. **Respetan `task.signal` y alimentan `task.onProgress`.** La señal se propaga al proceso o a la petición; el progreso (stdout de la CLI, stderr del runner de Open Interpreter) llega al panel como `turn_output`.
 1. **Nunca lanzan por "herramienta no disponible".** Devuelven un Markdown explicando el problema; así el ciclo continúa y el arquitecto puede reasignar. Solo lanzan por errores inesperados (y aun así el orquestador los captura si `autoStopOnError=false`, que es el valor por defecto en el servidor).
 2. **Respetan `task.projectPath`** como directorio de trabajo.
 3. **No hacen `process.env`.** Reciben su bloque de `AppConfig` en el constructor.
@@ -189,6 +193,7 @@ Si en vez de una CLI es una API HTTP, implementa `AgentAdapter` directamente (ve
 
 ```
 tests/
+├── shell.test.ts                run(): salida en vivo, aborto, árbol de procesos, timeout
 ├── verdict.test.ts              parseo de veredicto y equipo
 ├── phases.test.ts               regla de fases
 ├── prompt-builder.test.ts       contenido del prompt por rol/modo

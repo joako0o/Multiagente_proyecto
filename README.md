@@ -49,8 +49,8 @@ ANTIGRAVITY_PROVIDER=openai npm start                  # terminal 2
 1. **Nueva sesión** → título, directorio del proyecto, modo y máximo de turnos.
 2. Escribe el **objetivo** y envíalo. (Atajo: escribir sin sesión crea una autónoma.)
 3. Observa los turnos: el panel muestra fase, agente activo y cada respuesta renderizada.
-4. **Pausar** detiene el ciclo tras el turno en curso; **Reanudar** lo continúa.
-5. La pestaña **Archivos del workspace** muestra lo que van produciendo los agentes (informes Markdown, gráficos SVG/PNG, páginas HTML con d3, CSV) sin salir del panel.
+4. Mientras un agente trabaja ves su **salida en vivo** (comandos que ejecuta, tests que corren). **Pausar** deja terminar el turno en curso y no inicia otro; **Detener turno** interrumpe al agente ahora mismo (mata su proceso o aborta su petición) y conserva la salida parcial; **Reanudar** continúa desde ahí.
+5. La pestaña **Archivos del workspace** muestra lo que van produciendo los agentes (informes Markdown, gráficos SVG/PNG, páginas HTML con d3, CSV) sin salir del panel. **Eliminar sesión** la quita del panel; el `.md` se conserva.
 6. El historial legible queda en `conversations/<proyecto>/<fecha>_<título>.md`; el estado de cada sesión en `conversations/.sessions/<id>.json`, y **sobrevive a reinicios**: si el servidor cae en mitad de un ciclo, la sesión vuelve en pausa y puedes reanudarla.
 
 ### Modos de orquestación
@@ -157,7 +157,7 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 
 **REST**: `GET /api/health`, `/api/agents`, `/api/agents/status`, `/api/conversations`, `/api/conversations/:id`, `/api/conversations/:id/files?dir=` (listado del workspace), `/api/conversations/:id/files/raw?path=` (contenido, solo lectura y confinado al workspace), `/api/phases`, `/api/skills`, `/api/skills/:name`; `POST /api/skills/sync` (vuelve a clonar/actualizar los repositorios de skills).
 
-**WebSocket** `/ws` — comandos del cliente: `create_conversation`, `start_loop`, `send_message`, `pause_loop`, `resume_loop`. Eventos del servidor: `connected`, `conversation_created`, `message`, `turn_change`, `phase_change`, `status`, `error`. Tipos exactos en [`src/types/index.ts`](src/types/index.ts).
+**WebSocket** `/ws` — comandos del cliente: `create_conversation`, `start_loop`, `send_message`, `pause_loop`, `resume_loop`, `stop_turn`, `delete_conversation`. Eventos del servidor: `connected`, `conversation_created`, `conversation_deleted`, `message`, `turn_change`, `turn_output` (salida parcial del agente en curso), `phase_change`, `status`, `error`. Tipos exactos en [`src/types/index.ts`](src/types/index.ts).
 
 ## Estructura del código
 
@@ -200,7 +200,7 @@ src/
     ├── antigravity_bridge.py   Servidor OpenAI-compatible (Gemini o mock)
     └── interpreter_runner.py   Puente hacia el paquete Python de Open Interpreter
 skills/                    Skills incluidas (econometría, APIs financieras, d3.js)
-tests/                     node:test, 97 casos, sin dependencias externas
+tests/                     node:test, 109 casos, sin dependencias externas
 scripts/probe/             Sondas manuales contra herramientas reales + dobles (fake-llm, fake-openhands)
 docs/ARCHITECTURE.md       Decisiones de diseño y guía para extender
 ```
@@ -210,6 +210,7 @@ Para entender las decisiones de diseño y cómo añadir un agente, lee [`docs/AR
 ## Limitaciones conocidas
 
 - **Un servidor = un usuario.** No hay autenticación; está pensado para correr en tu máquina. El explorador de archivos expone (solo lectura) el workspace de cada sesión a quien pueda abrir el panel.
-- **Un ciclo interrumpido no se retoma a mitad de turno.** Si el servidor cae mientras un agente trabaja, ese turno se pierde (el estado del workspace puede quedar a medias); la sesión vuelve en pausa desde el último turno completado.
+- **Un ciclo interrumpido no se retoma a mitad de turno.** Si el servidor cae mientras un agente trabaja, ese turno se pierde (el estado del workspace puede quedar a medias); la sesión vuelve en pausa desde el último turno completado. Con un cierre ordenado (Ctrl+C) los procesos de los agentes se detienen; si el servidor muere de golpe, pueden quedar huérfanos.
+- **Detener no deshace.** Interrumpir a un agente deja en el workspace lo que hubiera escrito hasta ese momento; revisa el `git status` antes de reanudar.
 - **Los agentes modifican archivos de verdad.** Usa un workspace bajo Git y revisa los diffs. OpenHands en modo headless auto‑aprueba todas sus acciones.
 - **Cuotas.** Con el free tier de Gemini, varios agentes compartiendo la misma key pueden dar `429`; el arquitecto reintenta con espera, el resto reporta el error y el ciclo continúa.

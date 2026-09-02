@@ -218,6 +218,75 @@ describe('Orchestrator', () => {
     assert.deepEqual(conv.messages.filter(m => m.role === 'agent').map(m => m.agentId), ['antigravity', 'opencode', 'antigravity', 'opencode', 'antigravity']);
   });
 
+  test('stopTurn interrumpe al agente en curso, guarda su respuesta parcial y deja la sesión en pausa', async () => {
+    // Adaptador que respeta la señal como haría una CLI: resuelve al abortar con salida parcial.
+    const slow = new FakeAdapter((task) => new Promise<string>((resolve) => {
+      task.signal!.addEventListener('abort', () => resolve('⏹️ parcial'), { once: true });
+    }));
+    const architect = new FakeAdapter((_t, call) => call === 1 ? 'Plan' : 'VEREDICTO: APROBADO');
+    const { orchestrator, events } = setup({ antigravity: architect, opencode: slow });
+
+    const conv = orchestrator.createConversation({ title: 'Stop', agentIds: ['antigravity', 'opencode'] });
+    assert.throws(() => orchestrator.stopTurn(conv.id), /ningún turno/);
+    orchestrator.startLoop(conv.id, 'Objetivo');
+    // esperar a que el turno de opencode esté en curso
+    while (slow.tasks.length === 0) await new Promise(r => setTimeout(r, 5));
+
+    orchestrator.stopTurn(conv.id);
+    await waitForIdle(orchestrator, conv.id);
+
+    assert.equal(conv.status, 'paused');
+    assert.equal(conv.currentTurn, 2);                       // el turno interrumpido cuenta como ejecutado
+    assert.equal(conv.messages.at(-1)?.content, '⏹️ parcial'); // la salida parcial se conserva
+    assert.ok(events.some(e => e.type === 'status' && (e as any).data.status === 'paused'));
+
+    orchestrator.resumeLoop(conv.id);
+    await waitForIdle(orchestrator, conv.id);
+    assert.equal(conv.status, 'completed');
+  });
+
+  test('stopTurn con un adaptador que lanza al abortar deja un mensaje de sistema y no cuenta como error', async () => {
+    const throwing = new FakeAdapter((task) => new Promise<string>((_resolve, reject) => {
+      task.signal!.addEventListener('abort', () => reject(new Error('AbortError')), { once: true });
+    }));
+    const { orchestrator } = setup({ antigravity: new FakeAdapter(() => 'Plan'), opencode: throwing });
+    const conv = orchestrator.createConversation({ title: 'StopThrow', agentIds: ['antigravity', 'opencode'] });
+    orchestrator.startLoop(conv.id, 'Objetivo');
+    while (throwing.tasks.length === 0) await new Promise(r => setTimeout(r, 5));
+    orchestrator.stopTurn(conv.id);
+    await waitForIdle(orchestrator, conv.id);
+    assert.equal(conv.status, 'paused');
+    assert.match(conv.messages.at(-1)!.content, /detenido por el usuario/);
+  });
+
+  test('el progreso del agente se reenvía como eventos turn_output', async () => {
+    const chatty = new FakeAdapter((task) => { task.onProgress?.('a'); task.onProgress?.('b'); return 'ok'; });
+    const architect = new FakeAdapter((_t, call) => call === 1 ? 'Plan' : 'VEREDICTO: APROBADO');
+    const { orchestrator, events } = setup({ antigravity: architect, opencode: chatty });
+    const conv = orchestrator.createConversation({ title: 'Progress', agentIds: ['antigravity', 'opencode'] });
+    orchestrator.startLoop(conv.id, 'Objetivo');
+    await waitForIdle(orchestrator, conv.id);
+    const chunks = events.filter(e => e.type === 'turn_output').map(e => (e as any).data.chunk);
+    assert.deepEqual(chunks, ['a', 'b']);
+  });
+
+  test('deleteConversation borra la sesión, emite el evento y aborta el turno en curso', async () => {
+    const slow = new FakeAdapter((task) => new Promise<string>((resolve) => {
+      task.signal!.addEventListener('abort', () => resolve('parcial'), { once: true });
+    }));
+    const { orchestrator, events } = setup({ antigravity: new FakeAdapter(() => 'Plan'), opencode: slow });
+    const conv = orchestrator.createConversation({ title: 'Delete', agentIds: ['antigravity', 'opencode'] });
+    orchestrator.startLoop(conv.id, 'Objetivo');
+    while (slow.tasks.length === 0) await new Promise(r => setTimeout(r, 5));
+
+    orchestrator.deleteConversation(conv.id);
+    assert.equal(orchestrator.getConversation(conv.id), undefined);
+    assert.ok(events.some(e => e.type === 'conversation_deleted'));
+    await waitForIdle(orchestrator, conv.id);
+    assert.equal(orchestrator.listConversations().length, 0);
+    assert.throws(() => orchestrator.deleteConversation(conv.id), /no encontrada/);
+  });
+
   test('el prompt que recibe cada agente incluye el workspace y el objetivo', async () => {
     const architect = new FakeAdapter((_t, call) => call === 1 ? 'Plan' : 'VEREDICTO: APROBADO');
     const dev = new FakeAdapter(() => 'ok');

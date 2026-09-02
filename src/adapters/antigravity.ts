@@ -67,11 +67,14 @@ export class AntigravityAdapter implements AgentAdapter {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const text = this.config.provider === 'gemini'
-          ? await this.callGemini(task.prompt)
-          : await this.callOpenAiCompatible(task.prompt);
+          ? await this.callGemini(task.prompt, task.signal)
+          : await this.callOpenAiCompatible(task.prompt, task.signal);
         if (text.trim()) return text.trim();
         lastError = 'respuesta vacía del modelo';
       } catch (err) {
+        if (task.signal?.aborted) {
+          return '⏹️ **Turno detenido por el usuario.**';
+        }
         lastError = (err as Error).message;
         const retryable = /HTTP (429|5\d\d)|timeout|aborted|fetch failed/i.test(lastError);
         console.warn(`[Antigravity] intento ${attempt}/${MAX_ATTEMPTS} falló: ${lastError}`);
@@ -90,7 +93,13 @@ export class AntigravityAdapter implements AgentAdapter {
   // Proveedores
   // ---------------------------------------------------------------------------
 
-  private async callGemini(prompt: string): Promise<string> {
+  /** Timeout propio combinado con la señal de cancelación del turno, si la hay. */
+  private requestSignal(external?: AbortSignal): AbortSignal {
+    const timeout = AbortSignal.timeout(this.config.timeoutMs);
+    return external ? AbortSignal.any([external, timeout]) : timeout;
+  }
+
+  private async callGemini(prompt: string, signal?: AbortSignal): Promise<string> {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.config.model}:generateContent`;
     const response = await fetch(url, {
       method: 'POST',
@@ -100,7 +109,7 @@ export class AntigravityAdapter implements AgentAdapter {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.3, maxOutputTokens: 6000 }
       }),
-      signal: AbortSignal.timeout(this.config.timeoutMs)
+      signal: this.requestSignal(signal)
     });
 
     if (!response.ok) {
@@ -113,7 +122,7 @@ export class AntigravityAdapter implements AgentAdapter {
     return parts.filter(p => p.text && !p.thought).map(p => p.text).join('\n');
   }
 
-  private async callOpenAiCompatible(prompt: string): Promise<string> {
+  private async callOpenAiCompatible(prompt: string, signal?: AbortSignal): Promise<string> {
     const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
@@ -125,7 +134,7 @@ export class AntigravityAdapter implements AgentAdapter {
           { role: 'user', content: prompt }
         ]
       }),
-      signal: AbortSignal.timeout(this.config.timeoutMs)
+      signal: this.requestSignal(signal)
     });
 
     if (!response.ok) {

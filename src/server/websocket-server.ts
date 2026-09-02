@@ -98,6 +98,14 @@ export class ChatWebSocketServer {
           this.orchestrator.resumeLoop(command.data.conversationId, command.data.options);
           break;
 
+        case 'stop_turn':
+          this.orchestrator.stopTurn(command.data.conversationId);
+          break;
+
+        case 'delete_conversation':
+          this.orchestrator.deleteConversation(command.data.conversationId);
+          break;
+
         default:
           this.send(socket, { type: 'error', data: { message: `Comando no reconocido: ${(command as { type?: string }).type}` } });
       }

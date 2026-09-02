@@ -522,3 +522,31 @@ button { font: inherit; }
 .file-preview table.csv { border-collapse: collapse; font-size: 0.78rem; }
 .file-preview table.csv th, .file-preview table.csv td { border: 1px solid var(--border); padding: 0.25rem 0.5rem; white-space: nowrap; }
 .file-preview table.csv th { background: rgba(255, 255, 255, 0.05); position: sticky; top: 0; }
+
+/* ----- Salida en vivo y botones de control ------------------------------ */
+
+.btn-danger { border-color: rgba(255, 51, 102, 0.45); color: #fda4af; }
+.btn-danger:hover:not(:disabled) { background: rgba(255, 51, 102, 0.15); }
+
+.live-output {
+  order: 999;               /* siempre al final de la lista de mensajes */
+  border: 1px dashed rgba(56, 189, 248, 0.5);
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.05);
+  padding: 0.7rem 1rem;
+  max-width: 92%;
+}
+.live-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; font-weight: 600; color: #7dd3fc; margin-bottom: 0.4rem; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #38bdf8; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+.live-output pre {
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

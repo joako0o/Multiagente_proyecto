@@ -81,6 +81,7 @@ export class BridgeServer {
   }
 
   stop(): Promise<void> {
+    this.orchestrator.shutdown();
     this.wsServer.close();
     return new Promise(resolve => this.httpServer.close(() => resolve()));
   }

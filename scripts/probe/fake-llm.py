@@ -13,6 +13,7 @@ LLM falso compatible con OpenAI para probar los adaptadores de CLI
 Solo biblioteca estándar.
 """
 import json
+import os
 import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -34,6 +35,15 @@ echo "== pruebas ==" && npm test
 ```
 """
 
+# Con FAKE_LLM_SLOW=1, Open Interpreter recibe un comando que tarda ~60 s e imprime
+# progreso: sirve para probar "Detener turno" y la salida en vivo del panel.
+OI_SLOW_REPLY = """Ejecuto una verificación larga con progreso.
+
+```shell
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo "paso $i/12"; sleep 5; done
+```
+"""
+
 OI_FINAL_REPLY = "Las pruebas se ejecutaron correctamente: 1 test, 0 fallos. El proyecto está en buen estado."
 
 
@@ -44,12 +54,16 @@ def pick_reply(body: dict) -> str:
         if m.get("role") == "system" and isinstance(m.get("content"), str)
     )
     if "Open Interpreter" in system:
+        # Open Interpreter añade la salida del código ejecutado como mensajes posteriores
+        # al prompt inicial; solo esos deciden si ya toca la respuesta final.
+        non_system = [m for m in messages if m.get("role") != "system"]
         has_output = any(
-            m.get("role") != "system" and isinstance(m.get("content"), str)
-            and ("== pruebas ==" in m["content"] or "Output" in m["content"])
-            for m in messages
+            isinstance(m.get("content"), str) and ("== pruebas ==" in m["content"] or "paso 1/12" in m["content"] or "Output" in m["content"])
+            for m in non_system[1:]
         )
-        return OI_FINAL_REPLY if has_output else OI_CODE_REPLY
+        if has_output:
+            return OI_FINAL_REPLY
+        return OI_SLOW_REPLY if os.environ.get("FAKE_LLM_SLOW") == "1" else OI_CODE_REPLY
     return AIDER_REPLY
 
 

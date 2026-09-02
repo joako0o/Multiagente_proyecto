@@ -9,11 +9,12 @@ usarse a mano, aunque se puede:
     python interpreter_runner.py --check          # ¿está instalado? → JSON con la versión
 
 Entrada:  el prompt completo por stdin (multilínea, sin límite).
-Salida:   una única línea JSON por stdout:
+Salida:   una única línea JSON por stdout al terminar:
             {"messages": [{"role", "type", "format", "content"}, ...]}
           o {"error": "..."} con código de salida 2.
-          Todo lo que Open Interpreter imprime por su cuenta se redirige a stderr
-          para que stdout sea JSON limpio.
+          Por stderr va el PROGRESO en vivo (texto del modelo, código ejecutado
+          y salida de consola según se producen) más lo que Open Interpreter
+          imprima por su cuenta, de modo que stdout sea JSON limpio.
 
 ¿Por qué no el CLI `interpreter --stdin`? Porque lee UNA sola línea (`input()`),
 lo que trunca cualquier prompt multilínea.
@@ -75,7 +76,7 @@ def main() -> int:
             interpreter.llm.max_tokens = args.max_tokens
 
         try:
-            messages = interpreter.chat(prompt, display=False, stream=False) or []
+            messages = stream_chat(interpreter, prompt, progress=sys.stderr)
         except Exception as err:  # noqa: BLE001 — cualquier fallo se reporta como JSON
             emit(real_stdout, {"error": f"{type(err).__name__}: {err}", "version": version})
             return 2
@@ -94,6 +95,41 @@ def main() -> int:
         ],
     })
     return 0
+
+
+def stream_chat(interpreter, prompt: str, progress) -> list:
+    """
+    Ejecuta `interpreter.chat()` en modo streaming y va escribiendo el progreso
+    en `progress` (stderr): así el proceso padre puede mostrar en vivo qué
+    código se ejecuta y qué imprime, en vez de esperar al final.
+
+    Los fragmentos llegan como {"role", "type", "format", "content"} con
+    `start`/`end` en los límites de cada bloque. Devuelve los mensajes nuevos
+    completos (igual que `chat(stream=False)`).
+    """
+    before = len(interpreter.messages)
+    current_type = None
+    for chunk in interpreter.chat(prompt, display=False, stream=True):
+        if not isinstance(chunk, dict):
+            continue
+        ctype, cformat = chunk.get("type"), chunk.get("format")
+        if cformat == "active_line":
+            continue
+        if chunk.get("start"):
+            label = {"code": f"\n$ [{cformat or 'code'}]\n", "console": "\n> salida:\n", "message": "\n"}.get(ctype, "")
+            if ctype != current_type or ctype != "message":
+                progress.write(label)
+            current_type = ctype
+            continue
+        if chunk.get("end"):
+            progress.write("\n")
+            progress.flush()
+            continue
+        content = chunk.get("content")
+        if isinstance(content, str) and content:
+            progress.write(content)
+            progress.flush()
+    return interpreter.messages[before + 1:]  # +1: el propio prompt del usuario
 
 
 def package_version() -> str:

@@ -66,6 +66,8 @@ export class Orchestrator extends EventEmitter {
   private readonly conversations = new Map<string, Conversation>();
   /** Conversaciones con un runLoop() en ejecución. Evita solapar ciclos. */
   private readonly running = new Set<string>();
+  /** Controlador del turno en curso por conversación; `stopTurn()` lo dispara. */
+  private readonly turnControllers = new Map<string, AbortController>();
   private readonly registry: AgentRegistry;
   private readonly history: HistoryWriter;
   private readonly store?: SessionStore;
@@ -191,6 +193,48 @@ export class Orchestrator extends EventEmitter {
     this.setStatus(conversation, 'paused');
   }
 
+  /**
+   * Interrumpe el turno en curso: dispara la señal de cancelación (los
+   * adaptadores matan su proceso o abortan su petición) y deja la sesión en
+   * pausa. La respuesta parcial del agente se conserva como mensaje.
+   */
+  stopTurn(conversationId: string): void {
+    const conversation = this.require(conversationId);
+    if (!this.running.has(conversationId)) {
+      throw new Error('No hay ningún turno en ejecución');
+    }
+    this.setStatus(conversation, 'paused');
+    this.turnControllers.get(conversationId)?.abort();
+  }
+
+  /**
+   * Aborta todos los turnos en curso (cierre ordenado del servidor). Los
+   * procesos de los agentes se lanzan en su propio grupo, así que sin esto
+   * sobrevivirían al servidor.
+   */
+  shutdown(): void {
+    for (const [id, controller] of this.turnControllers) {
+      const conversation = this.conversations.get(id);
+      if (conversation) conversation.status = 'paused';
+      controller.abort();
+    }
+  }
+
+  /**
+   * Elimina una conversación (memoria y `.json`). El `.md` legible se
+   * conserva como registro. Si hay un turno en curso, se detiene primero.
+   */
+  deleteConversation(conversationId: string): void {
+    const conversation = this.require(conversationId);
+    if (this.running.has(conversationId)) {
+      conversation.status = 'paused';
+      this.turnControllers.get(conversationId)?.abort();
+    }
+    this.conversations.delete(conversationId);
+    this.store?.delete(conversationId);
+    this.emitEvent({ type: 'conversation_deleted', conversationId, data: { id: conversationId } });
+  }
+
   resumeLoop(conversationId: string, options: Partial<LoopOptions> = {}): void {
     const conversation = this.require(conversationId);
     if (conversation.status === 'completed') {
@@ -251,6 +295,7 @@ export class Orchestrator extends EventEmitter {
       });
 
       const goalReached = await this.executeTurn(conversation, agent, options);
+      if (!this.conversations.has(conversation.id)) return; // eliminada durante el turno
 
       conversation.currentTurn++;
       conversation.updatedAt = new Date();
@@ -298,6 +343,9 @@ export class Orchestrator extends EventEmitter {
       skillsSection
     });
 
+    const controller = new AbortController();
+    this.turnControllers.set(conversation.id, controller);
+
     let response: string;
     try {
       response = await agent.adapter.sendMessage({
@@ -307,14 +355,25 @@ export class Orchestrator extends EventEmitter {
         projectPath: conversation.projectPath,
         phase: conversation.phase,
         orchestrationMode: conversation.orchestrationMode,
-        turn: conversation.currentTurn
+        turn: conversation.currentTurn,
+        signal: controller.signal,
+        onProgress: (chunk) => this.emitEvent({ type: 'turn_output', conversationId: conversation.id, data: { agentId: agent.id, chunk } })
       });
     } catch (err) {
       const message = (err as Error).message;
+      if (controller.signal.aborted) {
+        this.addMessage(conversation.id, 'system', `⏹️ Turno de ${agent.name} detenido por el usuario.`, 'system');
+        return false;
+      }
       if (options.autoStopOnError) throw new Error(`${agent.name}: ${message}`);
       this.addMessage(conversation.id, 'system', `⚠️ ${agent.name} falló en este turno: ${message}`, 'system');
       return false;
+    } finally {
+      this.turnControllers.delete(conversation.id);
     }
+
+    // Si la conversación se eliminó mientras el agente trabajaba, no hay dónde guardar la respuesta.
+    if (!this.conversations.has(conversation.id)) return false;
 
     const metadata: MessageMetadata = {
       phase: conversation.phase,

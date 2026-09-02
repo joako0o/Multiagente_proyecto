@@ -90,6 +90,9 @@ export class OpenCodeAdapter implements AgentAdapter {
         const sessionId = await this.getOrCreateSession(task);
         return await this.postMessage(sessionId, task);
       } catch (err) {
+        if (task.signal?.aborted) {
+          return '⏹️ **Turno detenido por el usuario.**';
+        }
         lastError = (err as Error).message;
         console.warn(`[OpenCode] intento ${attempt}/${MAX_ATTEMPTS} falló: ${lastError}`);
 
@@ -212,15 +215,35 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   private async postMessage(sessionId: string, task: AgentTask): Promise<string> {
-    const response = await fetch(`${this.config.url}/session/${sessionId}/message?${this.directoryQuery(task)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: { providerID: this.config.providerID, modelID: this.config.modelID },
-        parts: [{ type: 'text', text: task.prompt }]
-      }),
-      signal: AbortSignal.timeout(this.config.timeoutMs)
-    });
+    // Si el usuario detiene el turno, además de cancelar nuestra petición hay que
+    // pedir a OpenCode que aborte la sesión: si no, seguiría trabajando en segundo plano.
+    const onAbort = () => {
+      fetch(`${this.config.url}/session/${sessionId}/abort?${this.directoryQuery(task)}`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(5000)
+      }).catch(() => { /* mejor esfuerzo */ });
+    };
+    task.signal?.addEventListener('abort', onAbort, { once: true });
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.config.url}/session/${sessionId}/message?${this.directoryQuery(task)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: { providerID: this.config.providerID, modelID: this.config.modelID },
+          parts: [{ type: 'text', text: task.prompt }]
+        }),
+        signal: task.signal ? AbortSignal.any([task.signal, AbortSignal.timeout(this.config.timeoutMs)]) : AbortSignal.timeout(this.config.timeoutMs)
+      });
+    } catch (err) {
+      if (task.signal?.aborted) {
+        return '⏹️ **Turno detenido por el usuario.** Se pidió a OpenCode que abortara la sesión; revisa el workspace por cambios parciales.';
+      }
+      throw err;
+    } finally {
+      task.signal?.removeEventListener('abort', onAbort);
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);

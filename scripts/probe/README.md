@@ -7,7 +7,8 @@ de una herramienta.
 
 | Script | Qué prueba | Requiere |
 |---|---|---|
-| `fake-llm.py` | Servidor OpenAI‑compatible en `:11500` que responde con una corrección fija (Aider/OpenCode) o con un bloque de shell + resumen (Open Interpreter). Soporta streaming SSE. | Python 3 |
+| `fake-llm.py` | Servidor OpenAI‑compatible en `:11500` que responde con una corrección fija (Aider/OpenCode) o con un bloque de shell + resumen (Open Interpreter). Soporta streaming SSE. Con `FAKE_LLM_SLOW=1` el comando de Open Interpreter dura 60 s e imprime progreso: sirve para probar "Detener turno" y la salida en vivo. | Python 3 |
+| `opencode-abort.ts` | Que detener un turno cancela la petición a OpenCode y aborta la sesión en su servidor. | `opencode serve` |
 | `aider.ts` | `AiderAdapter` con el CLI real: aplica la edición, limpia la salida, resume git, no ensucia el repo. | `pip install aider-chat` + `fake-llm.py` |
 | `interpreter.ts` | `InterpreterAdapter` con el paquete Python real vía `interpreter_runner.py`; también el modo fallback si se apunta a un Python sin el paquete. | `pip install open-interpreter` + `fake-llm.py` |
 | `opencode.ts` | `OpenCodeAdapter` contra `opencode serve` real (sesión, `?directory=`, partes). | binario `opencode` + proveedor configurado |

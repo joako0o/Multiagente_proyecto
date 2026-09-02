@@ -60,6 +60,17 @@ export interface AgentTask {
   orchestrationMode: OrchestrationMode;
   /** Índice de turno (base 0). */
   turn: number;
+  /**
+   * Se dispara cuando el usuario detiene el turno. Los adaptadores deben
+   * propagarlo a sus procesos/peticiones y devolver lo que tengan hasta ahí.
+   */
+  signal?: AbortSignal;
+  /**
+   * Canal de progreso opcional: fragmentos de salida según se producen
+   * (stdout de una CLI, herramientas de OpenCode…). El servidor los reenvía al
+   * panel como eventos `turn_output`.
+   */
+  onProgress?: (chunk: string) => void;
 }
 
 /**
@@ -210,8 +221,11 @@ export type ServerEvent =
   | { type: 'conversation_created'; conversationId: string; data: Conversation }
   | { type: 'message'; conversationId: string; data: ConversationMessage }
   | { type: 'turn_change'; conversationId: string; data: TurnChangeData }
+  /** Salida parcial del agente en curso (texto acumulable). */
+  | { type: 'turn_output'; conversationId: string; data: { agentId: string; chunk: string } }
   | { type: 'phase_change'; conversationId: string; data: { phase: ConversationPhase; turn: number } }
   | { type: 'status'; conversationId: string; data: { status: ConversationStatus; turns: number; phase: ConversationPhase } }
+  | { type: 'conversation_deleted'; conversationId: string; data: { id: string } }
   | { type: 'error'; conversationId?: string; data: { message: string } };
 
 // ---------------------------------------------------------------------------
@@ -239,4 +253,7 @@ export type ClientCommand =
   | { type: 'start_loop'; data: StartLoopCommand }
   | { type: 'send_message'; data: { conversationId: string; content: string } }
   | { type: 'pause_loop'; data: { conversationId: string } }
-  | { type: 'resume_loop'; data: { conversationId: string; options?: Partial<LoopOptions> } };
+  | { type: 'resume_loop'; data: { conversationId: string; options?: Partial<LoopOptions> } }
+  /** Interrumpe el turno en curso (mata el proceso del agente) y deja la sesión en pausa. */
+  | { type: 'stop_turn'; data: { conversationId: string } }
+  | { type: 'delete_conversation'; data: { conversationId: string } };

@@ -45,8 +45,12 @@
       <section class="controls">
         <button class="btn btn-primary" id="newSessionBtn" type="button">✨ Nueva sesión</button>
         <div class="btn-row">
-          <button class="btn btn-ghost" id="pauseBtn" type="button" disabled>⏸ Pausar</button>
+          <button class="btn btn-ghost" id="pauseBtn" type="button" disabled title="Termina el turno en curso y no inicia otro">⏸ Pausar</button>
           <button class="btn btn-ghost" id="resumeBtn" type="button" disabled>▶ Reanudar</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-danger" id="stopTurnBtn" type="button" disabled title="Interrumpe al agente ahora mismo (mata su proceso) y pausa la sesión">⏹ Detener turno</button>
+          <button class="btn btn-ghost" id="deleteBtn" type="button" disabled title="Borra la sesión del panel; el historial .md se conserva">🗑 Eliminar sesión</button>
         </div>
       </section>
 
@@ -77,6 +81,10 @@
       </div>
 
       <div class="messages" id="messages">
+        <div class="live-output" id="liveOutput" hidden>
+          <div class="live-header"><span id="liveTitle">Agente trabajando…</span><span class="live-dot"></span></div>
+          <pre id="liveText"></pre>
+        </div>
         <div class="empty-state" id="emptyState">
           <p><strong>Cómo funciona</strong></p>
           <ol>

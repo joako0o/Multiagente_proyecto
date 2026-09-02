@@ -6,8 +6,9 @@
  *
  *  1. Paquete Python `open-interpreter` (0.4.x, `pip install open-interpreter`).
  *     Su CLI `--stdin` solo lee UNA línea, así que se usa a través del runner
- *     `src/scripts/interpreter_runner.py`, que llama a `interpreter.chat()` con
- *     `auto_run=True` y devuelve los mensajes como JSON.
+ *     `src/scripts/interpreter_runner.py`, que llama a `interpreter.chat()` en
+ *     streaming con `auto_run=True`: el progreso (código y salida de consola)
+ *     sale por stderr según ocurre y el resultado final como JSON por stdout.
  *     Verificado con open-interpreter 0.4.3.
  *
  *  2. Binario nuevo (reescrito en Rust sobre Codex, instalador oficial de
@@ -148,10 +149,16 @@ export class InterpreterAdapter implements AgentAdapter {
     const result = await run(backend.python, args, {
       cwd: task.projectPath,
       input: task.prompt,
-      timeoutMs: this.config.timeoutMs
+      timeoutMs: this.config.timeoutMs,
+      signal: task.signal,
+      // El runner manda a stderr todo lo que Open Interpreter imprime (código, salidas); sirve como progreso.
+      onOutput: task.onProgress ? (chunk, stream) => { if (stream === 'stderr') task.onProgress!(chunk); } : undefined
     });
 
     const header = this.header(task, `${backend.python} interpreter_runner.py`, result);
+    if (result.aborted) {
+      return header + `⏹️ **Turno detenido por el usuario.**` + tail(result.stderr);
+    }
     if (result.timedOut) {
       return header + `⏱️ **Tiempo agotado** tras ${this.config.timeoutMs / 1000} s.` + tail(result.stderr);
     }
@@ -178,10 +185,15 @@ export class InterpreterAdapter implements AgentAdapter {
     const result = await run(backend.command, args, {
       cwd: task.projectPath,
       input: task.prompt,
-      timeoutMs: this.config.timeoutMs
+      timeoutMs: this.config.timeoutMs,
+      signal: task.signal,
+      onOutput: task.onProgress ? (chunk) => task.onProgress!(chunk) : undefined
     });
 
     const header = this.header(task, `${backend.command} ${args.join(' ')}`, result);
+    if (result.aborted) {
+      return header + `⏹️ **Turno detenido por el usuario.**` + tail(result.stdout || result.stderr);
+    }
     if (result.timedOut) {
       return header + `⏱️ **Tiempo agotado** tras ${this.config.timeoutMs / 1000} s.` + tail(result.stdout || result.stderr);
     }
@@ -211,11 +223,20 @@ export class InterpreterAdapter implements AgentAdapter {
     let failures = 0;
 
     for (const command of commands) {
+      if (task.signal?.aborted) {
+        reports.push('⏹️ _Detenido por el usuario antes de ejecutar el resto de comandos._');
+        break;
+      }
       const [bin, ...args] = command.split(/\s+/);
-      const result = await run(bin, args, { cwd: task.projectPath, timeoutMs: Math.min(this.config.timeoutMs, 120_000) })
-        .catch((err: Error) => ({ stdout: '', stderr: err.message, exitCode: 127, timedOut: false, durationMs: 0 } as RunResult));
+      task.onProgress?.(`$ ${command}\n`);
+      const result = await run(bin, args, {
+        cwd: task.projectPath,
+        timeoutMs: Math.min(this.config.timeoutMs, 120_000),
+        signal: task.signal,
+        onOutput: task.onProgress ? (chunk) => task.onProgress!(chunk) : undefined
+      }).catch((err: Error) => ({ stdout: '', stderr: err.message, exitCode: 127, timedOut: false, aborted: false, durationMs: 0 } as RunResult));
 
-      const ok = result.exitCode === 0 && !result.timedOut;
+      const ok = result.exitCode === 0 && !result.timedOut && !result.aborted;
       if (!ok) failures++;
 
       const output = truncateMiddle((result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim() || '(sin salida)', 3000);
