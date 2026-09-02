@@ -1,99 +1,166 @@
-import { AgentAdapter, ConversationMessage } from '../types';
+/**
+ * Adaptador de Antigravity (agente arquitecto).
+ *
+ * A diferencia del resto de agentes, Antigravity no es una herramienta que
+ * toque archivos: es un LLM al que se le pide planificar y revisar. Soporta
+ * dos proveedores:
+ *  - `gemini`: API oficial de Google (`generativelanguage.googleapis.com`).
+ *  - `openai`: cualquier endpoint compatible con `/v1/chat/completions`
+ *    (Ollama, LM Studio, el `antigravity_bridge.py` incluido, etc.).
+ */
+import { AdapterStatus, AgentAdapter, AgentTask } from '../types';
+import { AppConfig } from '../config';
+import { createLogger } from '../utils/logger';
 
-export interface AntigravityConfig {
-  apiKey?: string;
-  model?: string;
-}
+const log = createLogger('Antigravity');
+
+type AntigravityConfig = AppConfig['antigravity'];
+
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 10_000;
+
+const SYSTEM_PROMPT = `Eres Antigravity, arquitecto de software y líder técnico de un equipo de agentes de IA.
+Tu misión es diseñar la arquitectura, repartir el trabajo entre los agentes y revisar con rigor todo lo que entregan.
+
+Reglas:
+- Responde siempre en español, con Markdown claro (títulos, listas de tareas, bloques de código cuando aporten).
+- Sé concreto: nombra archivos, funciones, comandos y criterios de aceptación.
+- No inventes resultados: si un agente reporta un error, trátalo como error.
+- Cuando actúes como revisor, cierra SIEMPRE con una línea de veredicto exactamente así:
+  VEREDICTO: APROBADO      (si el objetivo está completo y validado)
+  VEREDICTO: REQUIERE_CAMBIOS   (si falta algo; enumera qué y para quién)`;
 
 export class AntigravityAdapter implements AgentAdapter {
-  private apiKey: string;
-  private model: string;
-
-  constructor(config?: AntigravityConfig) {
-    this.apiKey = config?.apiKey || process.env.GEMINI_API_KEY || '';
-    this.model = config?.model || process.env.ANTIGRAVITY_MODEL || 'gemini-2.5-flash';
-  }
+  constructor(private readonly config: AntigravityConfig) {}
 
   getSourceBackend(): string {
-    return `Google Antigravity Cloud (DeepMind Gemini • ${this.model})`;
+    return this.config.provider === 'gemini'
+      ? `Gemini API · ${this.config.model}`
+      : `OpenAI-compatible (${this.config.baseUrl}) · ${this.config.model}`;
   }
 
-  async isAvailable(): Promise<boolean> {
-    return !!this.apiKey;
-  }
-
-  async sendMessage(message: ConversationMessage): Promise<string> {
-    if (!this.apiKey) {
-      return '⚠️ [Error: GEMINI_API_KEY no configurada en .env para Antigravity]';
+  async getStatus(): Promise<AdapterStatus> {
+    if (this.config.provider === 'gemini') {
+      return this.config.apiKey
+        ? { available: true, mode: 'gemini', detail: this.config.model }
+        : { available: false, mode: 'gemini', detail: 'Falta GEMINI_API_KEY (o ANTIGRAVITY_API_KEY)' };
     }
 
-    const isAutonomous = message.metadata?.orchestrationMode === 'autonomous';
+    // Para endpoints compatibles con OpenAI probamos que respondan a /models.
+    try {
+      const response = await fetch(`${this.config.baseUrl}/models`, {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(3000)
+      });
+      return response.ok
+        ? { available: true, mode: 'openai', detail: `${this.config.baseUrl} · ${this.config.model}` }
+        : { available: false, mode: 'openai', detail: `HTTP ${response.status} en ${this.config.baseUrl}/models` };
+    } catch (err) {
+      return { available: false, mode: 'openai', detail: `Sin conexión con ${this.config.baseUrl}: ${(err as Error).message}` };
+    }
+  }
 
-    const systemInstruction = `Eres Google Antigravity, un agente arquitecto de software y planificador de élite de Google DeepMind.
-Tu misión es liderar el proyecto técnico, diseñar la arquitectura, asignar roles a los agentes especializados y revisar exhaustivamente la calidad de todo el código.
+  async sendMessage(task: AgentTask): Promise<string> {
+    const status = await this.getStatus();
+    if (!status.available) {
+      return `⚠️ **Antigravity no configurado:** ${status.detail}`;
+    }
 
-${isAutonomous ? `
-MODO AUTÓNOMO ACTIVADO:
-En tu primer turno, analiza los requerimientos del usuario y define la composición del equipo seleccionando los agentes que participarán:
-- OpenCode: para desarrollo e implementación de código.
-- Open Interpreter: para ejecución en terminal y validación de pruebas en vivo.
-- Aider: para control de versiones y verificación de Git.
-Al inicio de tu mensaje de planificación inicial, incluye una etiqueta estructurada con el equipo elegido:
-[EQUIPO: antigravity, opencode, interpreter, aider] (o los que consideres necesarios).
-` : ''}
-
-DIRECTIVAS GENERALES:
-- Responde siempre en español claro, profesional y estructurado.
-- Utiliza formato Markdown con títulos, listas de verificación y bloques de código.
-- En la fase de PLANIFICACIÓN: analiza los requerimientos, define la arquitectura y asigna tareas claras.
-- En la fase de REVISIÓN: revisa exhaustivamente el código y las pruebas entregadas. Si el objetivo está completamente cumplido y probado, incluye la palabra 'APROBADO' en tu veredicto final; si faltan cosas, indica 'REQUIERE_CAMBIOS' o 'INCOMPLETO' con correcciones concretas.`;
-
-    const maxRetries = 3;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    let lastError = '';
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
-        
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: systemInstruction }] },
-            contents: [{ role: 'user', parts: [{ text: message.content }] }],
-            generationConfig: { temperature: 0.4, maxOutputTokens: 5000 }
-          }),
-          signal: AbortSignal.timeout(45000)
-        });
-
-        if (response.status === 503 || response.status === 429) {
-          if (attempt < maxRetries) {
-            console.warn(`[Antigravity] Reintentando petición (${attempt}/${maxRetries}) tras esperar 10s...`);
-            await new Promise(r => setTimeout(r, 10000));
-            continue;
-          } else {
-            return `⏳ **[Google Antigravity - Límite de Cuota]**: Se alcanzó temporalmente el límite de peticiones por minuto en Gemini Cloud (Free Tier). Esperando el siguiente turno para reanudar.`;
-          }
+        const text = this.config.provider === 'gemini'
+          ? await this.callGemini(task.prompt, task.signal)
+          : await this.callOpenAiCompatible(task.prompt, task.signal);
+        if (text.trim()) return text.trim();
+        lastError = 'respuesta vacía del modelo';
+      } catch (err) {
+        if (task.signal?.aborted) {
+          return '⏹️ **Turno detenido por el usuario.**';
         }
-
-        if (!response.ok) {
-          const errBody = await response.text();
-          return `⚠️ **[Google Antigravity Error]**: HTTP ${response.status} - ${errBody.substring(0, 100)}`;
-        }
-
-        const data = await response.json();
-        const parts = data.candidates?.[0]?.content?.parts || [];
-        const contentPart = parts.find((p: any) => p.text && !p.thought) || parts[0];
-        if (contentPart?.text) {
-          return contentPart.text;
-        }
-      } catch (err: any) {
-        console.warn(`[Antigravity] Intento ${attempt} falló:`, err.message);
-        if (attempt === maxRetries) {
-          return `⚠️ Error al consultar Antigravity AI: ${err.message}`;
-        }
-        await new Promise(r => setTimeout(r, 2000));
+        lastError = (err as Error).message;
+        const retryable = /HTTP (429|5\d\d)|timeout|aborted|fetch failed/i.test(lastError);
+        log.warn(`intento ${attempt}/${MAX_ATTEMPTS} falló: ${lastError}`);
+        if (!retryable) break;
+      }
+      if (attempt < MAX_ATTEMPTS) {
+        await sleep(RETRY_DELAY_MS);
       }
     }
 
-    return '⚠️ [Antigravity: No se pudo obtener respuesta del modelo tras reintentos]';
+    return `⚠️ **Antigravity: no se pudo obtener respuesta del modelo** (${lastError}).\n\n` +
+      `_Si es un límite de cuota (HTTP 429), espera unos segundos y reanuda el ciclo._`;
   }
+
+  // ---------------------------------------------------------------------------
+  // Proveedores
+  // ---------------------------------------------------------------------------
+
+  /** Timeout propio combinado con la señal de cancelación del turno, si la hay. */
+  private requestSignal(external?: AbortSignal): AbortSignal {
+    const timeout = AbortSignal.timeout(this.config.timeoutMs);
+    return external ? AbortSignal.any([external, timeout]) : timeout;
+  }
+
+  private async callGemini(prompt: string, signal?: AbortSignal): Promise<string> {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.config.model}:generateContent`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.config.apiKey },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 6000 }
+      }),
+      signal: this.requestSignal(signal)
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    }
+
+    const data = await response.json() as GeminiResponse;
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    // Los modelos "thinking" pueden devolver partes de razonamiento marcadas con `thought`.
+    return parts.filter(p => p.text && !p.thought).map(p => p.text).join('\n');
+  }
+
+  private async callOpenAiCompatible(prompt: string, signal?: AbortSignal): Promise<string> {
+    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+      body: JSON.stringify({
+        model: this.config.model,
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: prompt }
+        ]
+      }),
+      signal: this.requestSignal(signal)
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    }
+
+    const data = await response.json() as OpenAiResponse;
+    return data.choices?.[0]?.message?.content ?? '';
+  }
+
+  private authHeaders(): Record<string, string> {
+    return this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {};
+  }
+}
+
+interface GeminiResponse {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+}
+
+interface OpenAiResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

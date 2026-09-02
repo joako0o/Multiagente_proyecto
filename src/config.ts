@@ -1,0 +1,229 @@
+/**
+ * Configuración de la aplicación.
+ *
+ * Único punto donde se leen variables de entorno. El resto del código recibe
+ * un `AppConfig` ya tipado y con valores por defecto, de modo que nadie más
+ * tiene que hacer `process.env.X || '...'`.
+ *
+ * Todas las variables están documentadas en `.env.example`.
+ */
+import { join } from 'path';
+
+export type ArchitectProvider = 'gemini' | 'openai';
+
+export interface AppConfig {
+  server: {
+    host: string;
+    port: number;
+  };
+
+  /** Antigravity = agente arquitecto. Habla con un LLM directamente. */
+  antigravity: {
+    /** `gemini` usa la API oficial de Google; `openai` cualquier endpoint compatible (Ollama, LM Studio, bridge…). */
+    provider: ArchitectProvider;
+    apiKey: string;
+    model: string;
+    /** Solo para `provider = openai`. Debe terminar en `/v1`. */
+    baseUrl: string;
+    timeoutMs: number;
+  };
+
+  /** OpenCode = servidor HTTP local (`opencode serve`). */
+  opencode: {
+    url: string;
+    providerID: string;
+    modelID: string;
+    /** Si el servidor no responde, intentar levantarlo con `opencode serve`. */
+    autoStart: boolean;
+    timeoutMs: number;
+  };
+
+  /** OpenHands = CLI en modo headless. */
+  openhands: {
+    command: string;
+    model: string;
+    apiKey: string;
+    baseUrl: string;
+    timeoutMs: number;
+  };
+
+  /** Aider = CLI en modo `--message-file`. */
+  aider: {
+    command: string;
+    /** Formato LiteLLM: `gemini/gemini-2.5-flash`, `openai/gpt-4o`, `ollama/qwen2.5-coder`… */
+    model: string;
+    /** Formato de aider: `proveedor=clave`, p. ej. `gemini=AIza…`. Vacío = usa el entorno del sistema. */
+    apiKey: string;
+    /** Base URL para modelos `openai/…` (Ollama, LM Studio, bridge). */
+    baseUrl: string;
+    autoCommits: boolean;
+    timeoutMs: number;
+  };
+
+  /**
+   * Open Interpreter. Se soportan el paquete Python (`pip install open-interpreter`,
+   * vía `src/scripts/interpreter_runner.py`) y el binario nuevo (`interpreter exec`).
+   */
+  interpreter: {
+    /** Intérprete de Python donde está instalado `open-interpreter`. */
+    python: string;
+    /** Binario nuevo (solo si no se usa el paquete Python). */
+    command: string;
+    /** Formato LiteLLM: `gemini/gemini-2.5-flash`, `openai/…`, `ollama/…`. */
+    model: string;
+    /** Base URL para modelos `openai/…` contra servidores locales. */
+    apiBase: string;
+    apiKey: string;
+    /** Evita el aviso "unable to determine context window" con modelos desconocidos. */
+    contextWindow: number;
+    maxTokens: number;
+    timeoutMs: number;
+  };
+
+  /** Valores por defecto del ciclo de turnos. */
+  loop: {
+    maxTurns: number;
+    delayBetweenTurnsMs: number;
+  };
+
+  /** Carpeta donde se guarda el historial `.md` de cada sesión. */
+  historyDir: string;
+  /** Carpeta con el estado `.json` de cada sesión (para sobrevivir a reinicios). */
+  sessionsDir: string;
+
+  /**
+   * Biblioteca de skills (estándar Agent Skills, archivos `SKILL.md`).
+   * Los repositorios se clonan en `cacheDir` y el arquitecto asigna skills a
+   * cada agente en el turno de planificación.
+   */
+  skills: {
+    enabled: boolean;
+    cacheDir: string;
+    /** Repositorios Git con skills. Formato en .env: `owner/repo[@ref]` separados por comas, o URLs completas. */
+    sources: Array<{ id: string; url: string; ref?: string }>;
+    /** Sincronizar (clone/pull) al arrancar el servidor. */
+    syncOnStart: boolean;
+    /** Carpetas del proyecto con skills incluidas (por defecto `./skills`). */
+    bundledDirs: string[];
+  };
+}
+
+type Env = Record<string, string | undefined>;
+
+function str(env: Env, key: string, fallback: string): string {
+  const value = env[key];
+  return value === undefined || value.trim() === '' ? fallback : value.trim();
+}
+
+function int(env: Env, key: string, fallback: number): number {
+  const parsed = parseInt(str(env, key, String(fallback)), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function bool(env: Env, key: string, fallback: boolean): boolean {
+  const value = str(env, key, String(fallback)).toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(value);
+}
+
+/**
+ * Construye la configuración a partir de un diccionario de entorno.
+ * Se recibe `env` como parámetro (en vez de leer `process.env` dentro) para
+ * poder probarlo sin efectos secundarios.
+ */
+export function loadConfig(env: Env = process.env): AppConfig {
+  const geminiKey = str(env, 'GEMINI_API_KEY', '');
+  const provider = str(env, 'ANTIGRAVITY_PROVIDER', 'gemini') === 'openai' ? 'openai' : 'gemini';
+
+  return {
+    server: {
+      host: str(env, 'HOST', 'localhost'),
+      port: int(env, 'PORT', 3000)
+    },
+    antigravity: {
+      provider,
+      apiKey: str(env, 'ANTIGRAVITY_API_KEY', geminiKey),
+      model: str(env, 'ANTIGRAVITY_MODEL', 'gemini-2.5-flash'),
+      baseUrl: str(env, 'ANTIGRAVITY_BASE_URL', 'http://127.0.0.1:11435/v1'),
+      timeoutMs: int(env, 'ANTIGRAVITY_TIMEOUT_MS', 60_000)
+    },
+    opencode: {
+      url: str(env, 'OPENCODE_URL', 'http://127.0.0.1:4096').replace(/\/+$/, ''),
+      providerID: str(env, 'OPENCODE_PROVIDER', 'google'),
+      modelID: str(env, 'OPENCODE_MODEL', 'gemini-2.5-flash'),
+      autoStart: bool(env, 'OPENCODE_AUTO_START', true),
+      timeoutMs: int(env, 'OPENCODE_TIMEOUT_MS', 180_000)
+    },
+    openhands: {
+      command: str(env, 'OPENHANDS_COMMAND', 'openhands'),
+      model: str(env, 'OPENHANDS_MODEL', geminiKey ? 'gemini/gemini-2.5-flash' : ''),
+      apiKey: str(env, 'OPENHANDS_API_KEY', geminiKey),
+      baseUrl: str(env, 'OPENHANDS_BASE_URL', ''),
+      timeoutMs: int(env, 'OPENHANDS_TIMEOUT_MS', 600_000)
+    },
+    aider: {
+      command: str(env, 'AIDER_COMMAND', 'aider'),
+      model: str(env, 'AIDER_MODEL', geminiKey ? 'gemini/gemini-2.5-flash' : ''),
+      apiKey: str(env, 'AIDER_API_KEY', geminiKey ? `gemini=${geminiKey}` : ''),
+      baseUrl: str(env, 'AIDER_BASE_URL', ''),
+      autoCommits: bool(env, 'AIDER_AUTO_COMMITS', false),
+      timeoutMs: int(env, 'AIDER_TIMEOUT_MS', 300_000)
+    },
+    interpreter: {
+      python: str(env, 'INTERPRETER_PYTHON', process.platform === 'win32' ? 'python' : 'python3'),
+      command: str(env, 'INTERPRETER_COMMAND', 'interpreter'),
+      model: str(env, 'INTERPRETER_MODEL', geminiKey ? 'gemini/gemini-2.5-flash' : ''),
+      apiBase: str(env, 'INTERPRETER_API_BASE', ''),
+      apiKey: str(env, 'INTERPRETER_API_KEY', geminiKey),
+      contextWindow: int(env, 'INTERPRETER_CONTEXT_WINDOW', 128_000),
+      maxTokens: int(env, 'INTERPRETER_MAX_TOKENS', 4_096),
+      timeoutMs: int(env, 'INTERPRETER_TIMEOUT_MS', 300_000)
+    },
+    loop: {
+      maxTurns: int(env, 'LOOP_MAX_TURNS', 15),
+      delayBetweenTurnsMs: int(env, 'LOOP_DELAY_MS', 3000)
+    },
+    historyDir: str(env, 'HISTORY_DIR', join(process.cwd(), 'conversations')),
+    sessionsDir: str(env, 'SESSIONS_DIR', join(process.cwd(), 'conversations', '.sessions')),
+    skills: {
+      enabled: bool(env, 'SKILLS_ENABLED', true),
+      cacheDir: str(env, 'SKILLS_CACHE_DIR', join(process.cwd(), '.skills-cache')),
+      sources: parseSkillSources(str(env, 'SKILLS_SOURCES', DEFAULT_SKILL_SOURCES)),
+      syncOnStart: bool(env, 'SKILLS_SYNC_ON_START', true),
+      bundledDirs: str(env, 'SKILLS_BUNDLED_DIRS', join(process.cwd(), 'skills')).split(',').map(s => s.trim()).filter(Boolean)
+    }
+  };
+}
+
+/**
+ * Repositorios de skills por defecto (todos MIT, verificados con esta versión):
+ *  - anthropics/skills            documentos (docx/pptx/xlsx/pdf), diseño web, pruebas de webapps.
+ *  - bytedance/deer-flow          análisis de datos, investigación profunda, gráficos, presentaciones,
+ *                                 revisión de papers.
+ *  - K-Dense-AI/scientific-agent-skills  ciencia de datos y escritura académica: estadística,
+ *                                 statsmodels, forecasting, literatura, LaTeX, posters (163 skills, ~500 MB).
+ *  - addyosmani/agent-skills      ingeniería: planificación, diseño de APIs, revisión, documentación/ADRs.
+ * Ver README → "Skills" para más repositorios (diseño UX, wshobson/agents, microsoft/skills…).
+ */
+export const DEFAULT_SKILL_SOURCES = 'anthropics/skills,bytedance/deer-flow,K-Dense-AI/scientific-agent-skills,addyosmani/agent-skills';
+
+/**
+ * `owner/repo`, `owner/repo@ref` o URL completa (`https://…/repo.git[@ref]`), separados por comas.
+ * El id es `owner/repo` para poder mostrarlo en el panel.
+ */
+export function parseSkillSources(raw: string): Array<{ id: string; url: string; ref?: string }> {
+  return raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const at = entry.lastIndexOf('@');
+      const hasRef = at > entry.indexOf('/') && !entry.slice(at + 1).includes('/');
+      const spec = hasRef ? entry.slice(0, at) : entry;
+      const ref = hasRef ? entry.slice(at + 1) : undefined;
+      if (/^https?:\/\//.test(spec) || /^git@/.test(spec)) {
+        const id = spec.replace(/\.git$/, '').split(/[/:]/).slice(-2).join('/');
+        return { id, url: spec, ref };
+      }
+      return { id: spec, url: `https://github.com/${spec}.git`, ref };
+    });
+}

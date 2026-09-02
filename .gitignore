@@ -1,0 +1,30 @@
+# Compilado (se genera con npm run build)
+dist/
+
+# Dependencias
+node_modules/
+
+# Variables de entorno (contienen API keys)
+.env
+.env.local
+.env.*.local
+
+# Historial de sesiones generado en tiempo de ejecución
+conversations/
+
+# Repositorios de skills clonados (se regeneran con SKILLS_SYNC_ON_START o POST /api/skills/sync)
+.skills-cache/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

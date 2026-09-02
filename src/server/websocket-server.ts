@@ -1,199 +1,135 @@
-import { WebSocketServer, WebSocket } from 'ws';
-import { Server } from 'http';
-import { ConversationManager } from '../core/conversation-manager';
-import { ChatEvent } from '../types';
+/**
+ * Servidor WebSocket (`/ws`).
+ *
+ * Dos direcciones:
+ *  - cliente → servidor: `ClientCommand` (crear sesión, iniciar/pausar/reanudar ciclo, enviar mensaje).
+ *  - servidor → cliente: `ServerEvent` (todo lo que emite el orquestador, difundido a todos los clientes).
+ *
+ * Al conectar, cada cliente recibe un evento `connected` con el catálogo de
+ * agentes y el resumen de conversaciones existentes.
+ */
+import { Server as HttpServer } from 'http';
+import { WebSocket, WebSocketServer } from 'ws';
+import { ClientCommand, ServerEvent } from '../types';
+import { Orchestrator } from '../core/orchestrator';
+import { AgentRegistry } from '../agents/registry';
+import { SkillCoordinator } from '../skills/skill-coordinator';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('WebSocket');
 
 export class ChatWebSocketServer {
-  private wss: WebSocketServer | null = null;
-  private clients: Set<WebSocket> = new Set();
-  private manager: ConversationManager;
+  private wss?: WebSocketServer;
 
-  constructor(manager: ConversationManager) {
-    this.manager = manager;
-    this.setupEventForwarding();
+  constructor(
+    private readonly orchestrator: Orchestrator,
+    private readonly registry: AgentRegistry,
+    private readonly skills: SkillCoordinator
+  ) {
+    this.orchestrator.on('event', (event: ServerEvent) => this.broadcast(event));
   }
 
-  attach(server: Server): void {
+  attach(server: HttpServer): void {
     this.wss = new WebSocketServer({ server, path: '/ws' });
 
-    this.wss.on('connection', (ws) => {
-      console.log('[WebSocket] Client connected');
-      this.clients.add(ws);
+    this.wss.on('connection', (socket) => {
+      log.debug('cliente conectado');
 
-      ws.on('message', (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          this.handleClientMessage(ws, message);
-        } catch (error) {
-          ws.send(JSON.stringify({
-            type: 'error',
-            data: { message: 'Formato de mensaje JSON inválido' }
-          }));
-        }
-      });
-
-      ws.on('close', () => {
-        console.log('[WebSocket] Client disconnected');
-        this.clients.delete(ws);
-      });
-
-      // Send initial state to connected client
-      ws.send(JSON.stringify({
+      this.send(socket, {
         type: 'connected',
         data: {
-          agents: this.manager.getAgents().map(a => ({
-            id: a.id,
-            name: a.name,
-            role: a.role,
-            type: a.type
-          })),
-          conversations: this.manager.getAllConversations().map(c => ({
-            id: c.id,
-            title: c.title,
-            status: c.status,
-            phase: c.phase,
-            projectPath: c.projectPath,
-            currentTurn: c.currentTurn,
-            maxTurns: c.maxTurns
-          }))
+          agents: this.registry.describeAll(),
+          conversations: this.orchestrator.listConversations(),
+          skills: this.skills.summaries()
         }
-      }));
+      });
+
+      socket.on('message', (raw) => {
+        let command: ClientCommand;
+        try {
+          command = JSON.parse(raw.toString());
+        } catch {
+          this.send(socket, { type: 'error', data: { message: 'El mensaje no es JSON válido' } });
+          return;
+        }
+        this.handle(socket, command);
+      });
+
+      socket.on('close', () => log.debug('cliente desconectado'));
+      socket.on('error', (err) => log.warn('error de socket', err));
     });
   }
 
-  private setupEventForwarding(): void {
-    this.manager.on('message', (event: ChatEvent) => {
-      this.broadcast(event);
-    });
-
-    this.manager.on('turn_change', (event: ChatEvent) => {
-      this.broadcast(event);
-    });
-
-    this.manager.on('phase_change', (event: ChatEvent) => {
-      this.broadcast(event);
-    });
-
-    this.manager.on('error', (event: ChatEvent) => {
-      this.broadcast(event);
-    });
-
-    this.manager.on('status', (event: ChatEvent) => {
-      this.broadcast(event);
-    });
+  close(): void {
+    this.wss?.clients.forEach(client => client.terminate());
+    this.wss?.close();
   }
 
-  private handleClientMessage(ws: WebSocket, message: any): void {
-    switch (message.type) {
-      case 'create_conversation':
-        this.handleCreateConversation(ws, message.data);
-        break;
+  // ---------------------------------------------------------------------------
 
-      case 'send_message':
-        this.handleSendMessage(ws, message.data);
-        break;
-
-      case 'start_loop':
-        this.handleStartLoop(ws, message.data);
-        break;
-
-      case 'pause_loop':
-        this.handlePauseLoop(ws, message.data);
-        break;
-
-      case 'resume_loop':
-        this.handleResumeLoop(ws, message.data);
-        break;
-
-      default:
-        ws.send(JSON.stringify({
-          type: 'error',
-          data: { message: `Tipo de mensaje no reconocido: ${message.type}` }
-        }));
-    }
-  }
-
-  private handleCreateConversation(ws: WebSocket, data: any): void {
+  private handle(socket: WebSocket, command: ClientCommand): void {
     try {
-      const conversation = this.manager.createConversation(
-        data.title || 'Nueva Tarea',
-        data.agentIds || ['antigravity', 'opencode'],
-        data.projectPath,
-        data.orchestrationMode || 'manual',
-        data.maxTurns ? parseInt(data.maxTurns) : undefined
-      );
-      ws.send(JSON.stringify({
-        type: 'conversation_created',
-        data: conversation
-      }));
-    } catch (error: any) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        data: { message: error.message }
-      }));
-    }
-  }
+      switch (command.type) {
+        case 'create_conversation': {
+          const data = command.data ?? {};
+          const conversation = this.orchestrator.createConversation({
+            title: data.title ?? 'Nueva sesión',
+            agentIds: data.agentIds,
+            projectPath: data.projectPath,
+            orchestrationMode: data.orchestrationMode,
+            maxTurns: data.maxTurns !== undefined ? Number(data.maxTurns) : undefined,
+            skills: data.skills
+          });
+          // Solo al creador: el resto se enterará por los eventos del ciclo.
+          this.send(socket, { type: 'conversation_created', conversationId: conversation.id, data: conversation });
+          break;
+        }
 
-  private async handleSendMessage(ws: WebSocket, data: any): Promise<void> {
-    try {
-      await this.manager.addMessage(
-        data.conversationId,
-        data.agentId || 'user',
-        data.content,
-        'user',
-        data.metadata
-      );
-    } catch (error: any) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        data: { message: error.message }
-      }));
-    }
-  }
+        case 'start_loop':
+          this.orchestrator.startLoop(command.data.conversationId, command.data.initialPrompt, command.data.options);
+          break;
 
-  private async handleStartLoop(ws: WebSocket, data: any): Promise<void> {
-    try {
-      await this.manager.startLoop(
-        data.conversationId,
-        data.initialPrompt,
-        data.config
-      );
-    } catch (error: any) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        data: { message: error.message }
-      }));
-    }
-  }
+        case 'send_message':
+          this.orchestrator.addMessage(command.data.conversationId, 'user', command.data.content, 'user');
+          break;
 
-  private handlePauseLoop(ws: WebSocket, data: any): void {
-    try {
-      this.manager.pauseLoop(data.conversationId);
-    } catch (error: any) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        data: { message: error.message }
-      }));
-    }
-  }
+        case 'pause_loop':
+          this.orchestrator.pauseLoop(command.data.conversationId);
+          break;
 
-  private handleResumeLoop(ws: WebSocket, data: any): void {
-    try {
-      this.manager.resumeLoop(data.conversationId, data.config);
-    } catch (error: any) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        data: { message: error.message }
-      }));
-    }
-  }
+        case 'resume_loop':
+          this.orchestrator.resumeLoop(command.data.conversationId, command.data.options);
+          break;
 
-  broadcast(event: ChatEvent): void {
-    const message = JSON.stringify(event);
-    this.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
+        case 'stop_turn':
+          this.orchestrator.stopTurn(command.data.conversationId);
+          break;
+
+        case 'delete_conversation':
+          this.orchestrator.deleteConversation(command.data.conversationId);
+          break;
+
+        default:
+          this.send(socket, { type: 'error', data: { message: `Comando no reconocido: ${(command as { type?: string }).type}` } });
       }
+    } catch (err) {
+      const conversationId = 'data' in command && command.data && 'conversationId' in command.data
+        ? command.data.conversationId
+        : undefined;
+      this.send(socket, { type: 'error', conversationId, data: { message: (err as Error).message } });
+    }
+  }
+
+  private send(socket: WebSocket, event: ServerEvent): void {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(event));
+    }
+  }
+
+  private broadcast(event: ServerEvent): void {
+    const payload = JSON.stringify(event);
+    this.wss?.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) client.send(payload);
     });
   }
 }

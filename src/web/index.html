@@ -3,943 +3,180 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Antigravity ↔ OpenCode Multi-Agent Bridge 2.0</title>
-  <!-- Marked and Highlight.js for Markdown & Syntax Highlighting -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
-  <style>
-    :root {
-      --bg-main: #0f141c;
-      --bg-sidebar: #151b26;
-      --bg-header: #121722;
-      --border-color: #232d3f;
-      --accent-pink: #ff3366;
-      --accent-purple: #8a2be2;
-      --accent-green: #00e676;
-      --accent-blue: #00b4d8;
-      --accent-orange: #ff9800;
-      --text-main: #e2e8f0;
-      --text-muted: #94a3b8;
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg-main);
-      color: var(--text-main);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    header {
-      background: var(--bg-header);
-      padding: 0.85rem 1.75rem;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .brand h1 {
-      font-size: 1.2rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, #ff3366, #b06ab3, #00b4d8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .status-bar {
-      display: flex;
-      gap: 1.25rem;
-      align-items: center;
-      font-size: 0.85rem;
-    }
-
-    .status-badge {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.35rem 0.75rem;
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 20px;
-      border: 1px solid var(--border-color);
-    }
-
-    .status-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: var(--accent-green);
-      box-shadow: 0 0 8px var(--accent-green);
-    }
-
-    .status-dot.disconnected {
-      background: var(--accent-pink);
-      box-shadow: 0 0 8px var(--accent-pink);
-    }
-
-    main {
-      flex: 1;
-      display: flex;
-      overflow: hidden;
-    }
-
-    .sidebar {
-      width: 340px;
-      background: var(--bg-sidebar);
-      border-right: 1px solid var(--border-color);
-      display: flex;
-      flex-direction: column;
-      padding: 1.25rem;
-      gap: 1.2rem;
-    }
-
-    .section-title {
-      font-size: 0.72rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-    }
-
-    .agent-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .agent-item {
-      background: rgba(255, 255, 255, 0.03);
-      padding: 0.65rem 0.85rem;
-      border-radius: 8px;
-      border-left: 3px solid var(--border-color);
-      transition: all 0.2s ease;
-    }
-
-    .agent-item.antigravity { border-left-color: var(--accent-purple); }
-    .agent-item.opencode { border-left-color: var(--accent-green); }
-    .agent-item.interpreter { border-left-color: var(--accent-blue); }
-    .agent-item.aider { border-left-color: var(--accent-orange); }
-
-    .agent-item h3 {
-      font-size: 0.85rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.2rem;
-    }
-
-    .agent-item p {
-      font-size: 0.72rem;
-      color: var(--text-muted);
-      line-height: 1.3;
-    }
-
-    .controls {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      padding-top: 0.6rem;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .btn {
-      padding: 0.65rem 1rem;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .btn:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #ff3366, #e91e63);
-      color: white;
-    }
-
-    .btn-primary:hover:not(:disabled) {
-      filter: brightness(1.15);
-      transform: translateY(-1px);
-    }
-
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border: 1px solid var(--border-color);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-      background: rgba(255, 255, 255, 0.12);
-    }
-
-    .log-area {
-      flex: 1;
-      max-height: 150px;
-      overflow-y: auto;
-      background: #080c12;
-      padding: 0.75rem;
-      border-radius: 6px;
-      font-family: 'JetBrains Mono', Consolas, monospace;
-      font-size: 0.7rem;
-      border: 1px solid var(--border-color);
-    }
-
-    .log-entry {
-      margin-bottom: 0.35rem;
-      color: var(--text-muted);
-      word-break: break-all;
-    }
-
-    .log-entry.success { color: var(--accent-green); }
-    .log-entry.error { color: var(--accent-pink); }
-    .log-entry.info { color: var(--accent-blue); }
-
-    .chat-container {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      background: var(--bg-main);
-    }
-
-    .chat-header {
-      padding: 1rem 1.75rem;
-      background: var(--bg-header);
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .chat-header-info h2 {
-      font-size: 1.05rem;
-      font-weight: 600;
-      margin-bottom: 0.2rem;
-    }
-
-    .chat-meta {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      display: flex;
-      gap: 1.25rem;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    #workspaceInfo {
-      max-width: 280px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      display: inline-block;
-    }
-
-    .phase-badge {
-      display: inline-block;
-      padding: 0.25rem 0.65rem;
-      border-radius: 12px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      background: rgba(0, 180, 216, 0.15);
-      color: var(--accent-blue);
-      border: 1px solid rgba(0, 180, 216, 0.3);
-    }
-
-    .phase-badge.PLANNING { background: rgba(138, 43, 226, 0.15); color: #c084fc; border-color: rgba(138, 43, 226, 0.3); }
-    .phase-badge.DEVELOPMENT { background: rgba(0, 230, 118, 0.15); color: #4ade80; border-color: rgba(0, 230, 118, 0.3); }
-    .phase-badge.EXECUTION { background: rgba(0, 180, 216, 0.15); color: #38bdf8; border-color: rgba(0, 180, 216, 0.3); }
-    .phase-badge.REVIEW { background: rgba(255, 179, 0, 0.15); color: #fbbf24; border-color: rgba(255, 179, 0, 0.3); }
-    .phase-badge.COMPLETED { background: rgba(0, 230, 118, 0.25); color: #86efac; border-color: #22c55e; }
-
-    .messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 1.5rem 2rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-
-    .message {
-      padding: 1.2rem;
-      border-radius: 10px;
-      max-width: 90%;
-      animation: fadeIn 0.2s ease;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .message.user {
-      background: #182638;
-      border: 1px solid #23354d;
-      margin-left: auto;
-    }
-
-    .message.antigravity {
-      background: #1a162b;
-      border-left: 4px solid var(--accent-purple);
-      border-top: 1px solid rgba(138, 43, 226, 0.2);
-      border-right: 1px solid rgba(138, 43, 226, 0.1);
-      border-bottom: 1px solid rgba(138, 43, 226, 0.1);
-    }
-
-    .message.opencode {
-      background: #10241e;
-      border-left: 4px solid var(--accent-green);
-      border-top: 1px solid rgba(0, 230, 118, 0.2);
-      border-right: 1px solid rgba(0, 230, 118, 0.1);
-      border-bottom: 1px solid rgba(0, 230, 118, 0.1);
-    }
-
-    .message.interpreter {
-      background: #0d2230;
-      border-left: 4px solid var(--accent-blue);
-      border-top: 1px solid rgba(0, 180, 216, 0.2);
-      border-right: 1px solid rgba(0, 180, 216, 0.1);
-      border-bottom: 1px solid rgba(0, 180, 216, 0.1);
-    }
-
-    .message.aider {
-      background: #2a1f10;
-      border-left: 4px solid var(--accent-orange);
-      border-top: 1px solid rgba(255, 152, 0, 0.2);
-      border-right: 1px solid rgba(255, 152, 0, 0.1);
-      border-bottom: 1px solid rgba(255, 152, 0, 0.1);
-    }
-
-    .message.system {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px dashed var(--border-color);
-      max-width: 100%;
-      text-align: center;
-      color: var(--text-muted);
-      padding: 0.75rem;
-    }
-
-    .message-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.75rem;
-      font-size: 0.82rem;
-      font-weight: 600;
-    }
-
-    .message.antigravity .message-header { color: #c084fc; }
-    .message.opencode .message-header { color: #4ade80; }
-    .message.interpreter .message-header { color: #38bdf8; }
-    .message.aider .message-header { color: #fb923c; }
-    .message.user .message-header { color: #38bdf8; }
-
-    .message-content {
-      line-height: 1.6;
-      font-size: 0.92rem;
-      word-break: break-word;
-    }
-
-    .message-content h1, .message-content h2, .message-content h3 {
-      margin: 0.75rem 0 0.4rem 0;
-      color: #f8fafc;
-    }
-
-    .message-content pre {
-      background: #090d14;
-      padding: 1rem;
-      border-radius: 6px;
-      overflow-x: auto;
-      margin: 0.75rem 0;
-      border: 1px solid var(--border-color);
-    }
-
-    .message-content code {
-      font-family: 'JetBrains Mono', Consolas, monospace;
-      font-size: 0.85rem;
-    }
-
-    .input-area {
-      padding: 1.25rem 2rem;
-      background: var(--bg-header);
-      border-top: 1px solid var(--border-color);
-    }
-
-    .input-row {
-      display: flex;
-      gap: 0.75rem;
-    }
-
-    .input-row input {
-      flex: 1;
-      padding: 0.85rem 1.15rem;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      background: #0c1017;
-      color: var(--text-main);
-      font-size: 0.95rem;
-    }
-
-    .input-row input:focus {
-      outline: none;
-      border-color: var(--accent-pink);
-    }
-
-    .modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(4px);
-      justify-content: center;
-      align-items: center;
-      z-index: 100;
-    }
-
-    .modal.active { display: flex; }
-
-    .modal-content {
-      background: var(--bg-sidebar);
-      border: 1px solid var(--border-color);
-      padding: 2rem;
-      border-radius: 12px;
-      width: 520px;
-      max-width: 90%;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    }
-
-    .modal-content h2 {
-      margin-bottom: 1.25rem;
-      font-size: 1.2rem;
-      color: #fff;
-    }
-
-    .form-group {
-      margin-bottom: 1rem;
-    }
-
-    .form-group label {
-      display: block;
-      margin-bottom: 0.4rem;
-      color: var(--text-muted);
-      font-size: 0.82rem;
-      font-weight: 500;
-    }
-
-    .form-group input, .form-group select {
-      width: 100%;
-      padding: 0.75rem 1rem;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      background: #0c1017;
-      color: #fff;
-      font-size: 0.9rem;
-    }
-
-    .agent-checkboxes {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.5rem;
-      background: rgba(0, 0, 0, 0.2);
-      padding: 0.75rem;
-      border-radius: 6px;
-      border: 1px solid var(--border-color);
-    }
-
-    .agent-checkboxes label {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.8rem;
-      color: var(--text-main);
-      cursor: pointer;
-    }
-  </style>
+  <title>Multi-Agent Bridge</title>
+  <link rel="stylesheet" href="vendor/atom-one-dark.min.css">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <h1>⚡ Antigravity ↔ OpenCode Multi-Agent Bridge 2.0</h1>
-    </div>
-    <div class="status-bar">
-      <div class="status-badge">
-        <span id="connectionStatus">Conectando WebSocket...</span>
-        <div id="statusDot" class="status-dot disconnected"></div>
-      </div>
+  <header class="topbar">
+    <h1>⚡ Multi-Agent Bridge</h1>
+    <div class="connection" id="connection">
+      <span id="connectionLabel">Conectando…</span>
+      <span class="dot" id="connectionDot"></span>
     </div>
   </header>
 
-  <main>
+  <main class="layout">
+    <!-- ───────────── Barra lateral ───────────── -->
     <aside class="sidebar">
-      <div>
-        <div class="section-title">Agentes Disponibles</div>
-        <div class="agent-list" id="agentList">
-          <div class="agent-item antigravity">
-            <h3>Google Antigravity <span style="font-size: 0.7rem; color: #c084fc;">Cloud Gemini</span></h3>
-            <p>Arquitecto & Líder Técnico de Google DeepMind</p>
-          </div>
-          <div class="agent-item opencode">
-            <h3>OpenCode Desktop <span style="font-size: 0.7rem; color: #4ade80;">Local :4096</span></h3>
-            <p>Servidor Nativo Desktop (Agente Build)</p>
-          </div>
-          <div class="agent-item interpreter">
-            <h3>Open Interpreter <span style="font-size: 0.7rem; color: #38bdf8;">Terminal / QA</span></h3>
-            <p>Ejecutor de comandos, tests y scripts en vivo</p>
-          </div>
-          <div class="agent-item aider">
-            <h3>Aider Git Master <span style="font-size: 0.7rem; color: #fb923c;">Git CLI</span></h3>
-            <p>Control de versiones, verificación de diffs y ramas</p>
-          </div>
+      <section>
+        <h2 class="section-title">Agentes</h2>
+        <ul class="agent-list" id="agentList">
+          <li class="muted">Cargando agentes…</li>
+        </ul>
+        <button class="btn btn-ghost btn-small" id="refreshStatusBtn" type="button">↻ Comprobar disponibilidad</button>
+      </section>
+
+      <section id="skillsSection">
+        <h2 class="section-title">Skills <span class="muted" id="skillsCount"></span></h2>
+        <p class="muted" id="skillsHint">Instrucciones y herramientas reutilizables (formato Agent Skills) que el arquitecto reparte entre los agentes.</p>
+        <input type="search" class="skill-search" id="skillSearch" placeholder="Buscar: series temporales, presentación, landing…" autocomplete="off" />
+        <ul class="skill-list" id="skillList"></ul>
+        <button class="btn btn-ghost btn-small" id="syncSkillsBtn" type="button">⇣ Sincronizar repositorios</button>
+      </section>
+
+      <section>
+        <h2 class="section-title">Sesiones</h2>
+        <ul class="conversation-list" id="conversationList">
+          <li class="muted">Sin sesiones todavía</li>
+        </ul>
+      </section>
+
+      <section class="controls">
+        <button class="btn btn-primary" id="newSessionBtn" type="button">✨ Nueva sesión</button>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="pauseBtn" type="button" disabled title="Termina el turno en curso y no inicia otro">⏸ Pausar</button>
+          <button class="btn btn-ghost" id="resumeBtn" type="button" disabled>▶ Reanudar</button>
         </div>
-      </div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-danger" id="stopTurnBtn" type="button" disabled title="Interrumpe al agente ahora mismo (mata su proceso) y pausa la sesión">⏹ Detener turno</button>
+          <button class="btn btn-ghost" id="deleteBtn" type="button" disabled title="Borra la sesión del panel; el historial .md se conserva">🗑 Eliminar sesión</button>
+        </div>
+      </section>
 
-      <div class="controls">
-        <div class="section-title">Control de Sesión</div>
-        <button class="btn btn-primary" onclick="showNewConversationModal()">
-          ✨ Nueva Sesión Multi-Agente
-        </button>
-        <button class="btn btn-secondary" onclick="pauseLoop()" id="pauseBtn" disabled>
-          ⏸️ Pausar Ciclo
-        </button>
-        <button class="btn btn-secondary" onclick="resumeLoop()" id="resumeBtn" disabled>
-          ▶️ Reanudar Ciclo
-        </button>
-      </div>
-
-      <div style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
-        <div class="section-title">Registro de Eventos y Backend</div>
-        <div class="log-area" id="logArea"></div>
-      </div>
+      <section class="log-section">
+        <h2 class="section-title">Registro</h2>
+        <div class="log" id="log"></div>
+      </section>
     </aside>
 
-    <section class="chat-container">
+    <!-- ───────────── Chat ───────────── -->
+    <section class="chat">
       <div class="chat-header">
-        <div class="chat-header-info">
-          <h2 id="conversationTitle">Selecciona o inicia una sesión</h2>
+        <div>
+          <h2 id="conversationTitle">Selecciona o crea una sesión</h2>
           <div class="chat-meta">
-            <span id="workspaceInfo">Workspace: Local</span>
-            <span id="modeInfo">Modo: Automático</span>
-            <span id="turnIndicator">Turno: 0 / 20</span>
+            <span id="workspaceInfo" title="">Workspace: —</span>
+            <span id="modeInfo">Modo: —</span>
+            <span id="turnInfo">Turno: —</span>
+          </div>
+          <div class="session-skills" id="sessionSkills" hidden></div>
+        </div>
+        <span class="phase-badge" id="phaseBadge">—</span>
+      </div>
+
+      <div class="tabs" id="chatTabs">
+        <button class="tab active" data-tab="messages" type="button">💬 Conversación</button>
+        <button class="tab" data-tab="files" type="button">📁 Archivos del workspace</button>
+      </div>
+
+      <div class="messages" id="messages">
+        <div class="live-output" id="liveOutput" hidden>
+          <div class="live-header"><span id="liveTitle">Agente trabajando…</span><span class="live-dot"></span></div>
+          <pre id="liveText"></pre>
+        </div>
+        <div class="empty-state" id="emptyState">
+          <p><strong>Cómo funciona</strong></p>
+          <ol>
+            <li>Crea una sesión indicando el directorio del proyecto.</li>
+            <li>Escribe el objetivo. Antigravity planifica y reparte el trabajo.</li>
+            <li>Los agentes se turnan: implementan, ejecutan pruebas y revisan.</li>
+            <li>El ciclo termina cuando el arquitecto aprueba el resultado.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="files" id="filesPanel" hidden>
+        <div class="files-toolbar">
+          <nav class="breadcrumbs" id="fileBreadcrumbs"></nav>
+          <button class="btn btn-ghost btn-small" id="refreshFilesBtn" type="button">↻ Actualizar</button>
+        </div>
+        <div class="files-body">
+          <ul class="file-list" id="fileList"><li class="muted">Selecciona una sesión</li></ul>
+          <div class="file-preview" id="filePreview">
+            <p class="muted">Elige un archivo para previsualizarlo: informes Markdown, gráficos SVG/PNG, páginas HTML con d3, CSV…</p>
           </div>
         </div>
-        <div>
-          <span class="phase-badge PLANNING" id="phaseBadge">PLANIFICACIÓN</span>
-        </div>
       </div>
 
-      <div class="messages" id="messages"></div>
-
-      <div class="input-area">
-        <div class="input-row">
-          <input
-            type="text"
-            id="messageInput"
-            placeholder="Escribe la directiva para el equipo de agentes..."
-            onkeypress="handleKeyPress(event)"
-          />
-          <button class="btn btn-primary" onclick="sendMessage()">Enviar Directiva</button>
-        </div>
-      </div>
+      <form class="composer" id="composer">
+        <input type="text" id="messageInput" placeholder="Describe el objetivo para el equipo…" autocomplete="off" />
+        <button class="btn btn-primary" type="submit" id="sendBtn">Enviar</button>
+      </form>
     </section>
   </main>
 
-  <div class="modal" id="newConversationModal">
-    <div class="modal-content">
-      <h2>Nueva Sesión de Agentes</h2>
-      <div class="form-group">
-        <label for="convTitle">Título del Proyecto / Tarea</label>
-        <input type="text" id="convTitle" placeholder="Ej: Auditoría y Refactorización del Módulo X" />
-      </div>
-      <div class="form-group">
-        <label for="orchestrationMode">Modo de Orquestación</label>
-        <select id="orchestrationMode" onchange="toggleAgentSelection()">
-          <option value="autonomous">🧠 Autónomo (Antigravity decide el equipo y asigna roles)</option>
-          <option value="manual">🎛️ Manual (Tú seleccionas los agentes participantes)</option>
-        </select>
-      </div>
-      <div class="form-group" id="agentSelectionGroup" style="display: none;">
-        <label>Agentes Participantes</label>
-        <div class="agent-checkboxes">
-          <label><input type="checkbox" id="agent-antigravity" value="antigravity" checked> 🏛️ Antigravity</label>
-          <label><input type="checkbox" id="agent-opencode" value="opencode" checked> 💻 OpenCode Desktop</label>
-          <label><input type="checkbox" id="agent-interpreter" value="interpreter"> ⚡ Open Interpreter</label>
-          <label><input type="checkbox" id="agent-aider" value="aider"> 🐙 Aider Git</label>
-        </div>
-      </div>
-      <div class="form-group">
-        <label for="projectPath">Directorio del Proyecto (Workspace)</label>
-        <input type="text" id="projectPath" placeholder="C:\Ruta\Al\Proyecto (Opcional)" />
-      </div>
-      <div class="form-group">
-        <label for="maxTurns">Máximo de turnos</label>
-        <input type="number" id="maxTurns" value="15" min="2" max="50" />
-      </div>
-      <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-        <button class="btn btn-secondary" onclick="closeModal()" style="flex: 1;">
-          Cancelar
-        </button>
-        <button class="btn btn-primary" onclick="createConversation()" style="flex: 1;">
-          Iniciar Sesión
-        </button>
+  <!-- ───────────── Modal: detalle de skill ───────────── -->
+  <div class="modal" id="skillModal" hidden>
+    <div class="modal-content skill-detail">
+      <h2 id="skillModalTitle">Skill</h2>
+      <p class="muted" id="skillModalMeta"></p>
+      <div class="message-content" id="skillModalBody"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" type="button" id="closeSkillBtn">Cerrar</button>
       </div>
     </div>
   </div>
 
-  <script>
-    let ws = null;
-    let currentConversationId = null;
-    let isLoopRunning = false;
-    let pendingPrompt = null;
+  <!-- ───────────── Modal: nueva sesión ───────────── -->
+  <div class="modal" id="newSessionModal" hidden>
+    <form class="modal-content" id="newSessionForm">
+      <h2>Nueva sesión</h2>
 
-    marked.setOptions({
-      highlight: function(code, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-          return hljs.highlight(code, { language: lang }).value;
-        }
-        return hljs.highlightAuto(code).value;
-      },
-      breaks: true
-    });
+      <label class="field">
+        <span>Título</span>
+        <input type="text" id="sessionTitle" placeholder="Ej: API REST de facturación" />
+      </label>
 
-    function toggleAgentSelection() {
-      const mode = document.getElementById('orchestrationMode').value;
-      document.getElementById('agentSelectionGroup').style.display = mode === 'manual' ? 'block' : 'none';
-    }
+      <label class="field">
+        <span>Directorio del proyecto (workspace)</span>
+        <input type="text" id="sessionProjectPath" placeholder="Ruta absoluta. Vacío = directorio del servidor" />
+      </label>
 
-    function connect() {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      <label class="field">
+        <span>Modo de orquestación</span>
+        <select id="sessionMode">
+          <option value="autonomous">Autónomo — Antigravity elige el equipo</option>
+          <option value="manual">Manual — elijo yo los agentes</option>
+        </select>
+      </label>
 
-      ws.onopen = () => {
-        document.getElementById('connectionStatus').textContent = 'Puente Conectado';
-        document.getElementById('statusDot').classList.remove('disconnected');
-        addLog('Conectado al servidor WebSocket', 'success');
-      };
+      <fieldset class="field" id="teamField" hidden>
+        <legend>Agentes participantes</legend>
+        <div class="team-grid" id="teamCheckboxes"></div>
+      </fieldset>
 
-      ws.onclose = () => {
-        document.getElementById('connectionStatus').textContent = 'Desconectado';
-        document.getElementById('statusDot').classList.add('disconnected');
-        addLog('Conexión perdida. Reintentando...', 'error');
-        setTimeout(connect, 3000);
-      };
+      <fieldset class="field" id="skillsField" hidden>
+        <legend>Skills por agente <span class="muted">(opcional — el arquitecto también puede asignarlas al planificar)</span></legend>
+        <p class="muted">Escribe para buscar y pulsa una skill para añadirla al agente seleccionado.</p>
+        <div class="skills-assign" id="skillsAssign"></div>
+      </fieldset>
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          handleServerMessage(data);
-        } catch (e) {
-          console.error('Error parseando mensaje:', e);
-        }
-      };
-    }
+      <label class="field">
+        <span>Máximo de turnos</span>
+        <input type="number" id="sessionMaxTurns" value="15" min="2" max="100" />
+      </label>
 
-    let currentMaxTurns = 20;
+      <div class="btn-row">
+        <button class="btn btn-ghost" type="button" id="cancelSessionBtn">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Crear sesión</button>
+      </div>
+    </form>
+  </div>
 
-    function handleServerMessage(event) {
-      switch (event.type) {
-        case 'connected':
-          if (event.data && event.data.conversations && event.data.conversations.length > 0) {
-            const lastConv = event.data.conversations[event.data.conversations.length - 1];
-            loadConversation(lastConv.id);
-          }
-          break;
-
-        case 'conversation_created':
-          currentConversationId = event.data.id;
-          currentMaxTurns = event.data.maxTurns || 20;
-          document.getElementById('conversationTitle').textContent = event.data.title;
-          document.getElementById('modeInfo').textContent = `Modo: ${event.data.orchestrationMode || 'Automático'}`;
-          const displayPathCreated = event.data.projectPath ? (event.data.projectPath.length > 45 ? event.data.projectPath.substring(0, 45) + '...' : event.data.projectPath) : 'Local';
-          document.getElementById('workspaceInfo').textContent = `Workspace: ${displayPathCreated}`;
-          document.getElementById('workspaceInfo').title = event.data.projectPath || 'Local';
-          document.getElementById('turnIndicator').textContent = `Turno: 0 / ${currentMaxTurns}`;
-          addLog(`Sesión creada: ${event.data.title} [Max Turnos: ${currentMaxTurns}]`, 'success');
-          
-          if (pendingPrompt) {
-            const promptToSend = pendingPrompt;
-            pendingPrompt = null;
-            startLoop(promptToSend);
-          }
-          break;
-
-        case 'message':
-          if (event.data.conversationId === currentConversationId) {
-            addMessageToChat(event.data);
-          }
-          addLog(`Respuesta de ${event.data.agentId} [${event.data.metadata?.sourceBackend || 'OK'}]`, 'info');
-          break;
-
-        case 'turn_change':
-          if (event.data.conversationId === currentConversationId) {
-            updateTurnIndicator(event.data.turn, event.data.agentName);
-            if (event.data.phase) updatePhaseBadge(event.data.phase);
-          }
-          addLog(`Turno ${event.data.turn + 1}: ${event.data.agentName} en fase ${event.data.phase || ''}`);
-          break;
-
-        case 'phase_change':
-          if (event.data.conversationId === currentConversationId) {
-            updatePhaseBadge(event.data.phase);
-          }
-          addLog(`Transición de Fase ➔ ${event.data.phase}`, 'info');
-          break;
-
-        case 'status':
-          if (event.data.status === 'completed') {
-            isLoopRunning = false;
-            updateButtons();
-            updatePhaseBadge('COMPLETED');
-            addLog('✅ Objetivo alcanzado o ciclo concluido por consenso', 'success');
-          }
-          break;
-
-        case 'error':
-          addLog(`⚠️ ${event.data.message || event.data.error}`, 'error');
-          break;
-      }
-    }
-
-    function loadConversation(convId) {
-      fetch(`/api/conversations/${convId}`)
-        .then(res => res.json())
-        .then(conv => {
-          currentConversationId = conv.id;
-          currentMaxTurns = conv.maxTurns || 20;
-          document.getElementById('conversationTitle').textContent = conv.title;
-          const displayPath = conv.projectPath ? (conv.projectPath.length > 45 ? conv.projectPath.substring(0, 45) + '...' : conv.projectPath) : 'Local';
-          document.getElementById('workspaceInfo').textContent = `Workspace: ${displayPath}`;
-          document.getElementById('workspaceInfo').title = conv.projectPath || 'Local';
-          document.getElementById('modeInfo').textContent = `Modo: ${conv.orchestrationMode || 'Automático'}`;
-          document.getElementById('turnIndicator').textContent = `Turno: ${conv.currentTurn} / ${currentMaxTurns}`;
-          updatePhaseBadge(conv.phase || 'PLANNING');
-          
-          const container = document.getElementById('messages');
-          container.innerHTML = '';
-          (conv.messages || []).forEach(addMessageToChat);
-        });
-    }
-
-    function updatePhaseBadge(phase) {
-      const badge = document.getElementById('phaseBadge');
-      badge.textContent = phase;
-      badge.className = `phase-badge ${phase}`;
-    }
-
-    function updateTurnIndicator(turn, agentName) {
-      document.getElementById('turnIndicator').textContent =
-        `Turno: ${turn + 1} / ${currentMaxTurns} (${agentName} trabajando...)`;
-    }
-
-    function showNewConversationModal() {
-      document.getElementById('newConversationModal').classList.add('active');
-    }
-
-    function closeModal() {
-      document.getElementById('newConversationModal').classList.remove('active');
-    }
-
-    function createConversation() {
-      const title = document.getElementById('convTitle').value.trim() || 'Nueva Sesión Multi-Agente';
-      const projectPath = document.getElementById('projectPath').value.trim();
-      const maxTurns = parseInt(document.getElementById('maxTurns').value) || 20;
-      const orchestrationMode = document.getElementById('orchestrationMode').value;
-
-      let agentIds = ['antigravity', 'opencode'];
-      if (orchestrationMode === 'manual') {
-        agentIds = [];
-        if (document.getElementById('agent-antigravity').checked) agentIds.push('antigravity');
-        if (document.getElementById('agent-opencode').checked) agentIds.push('opencode');
-        if (document.getElementById('agent-interpreter').checked) agentIds.push('interpreter');
-        if (document.getElementById('agent-aider').checked) agentIds.push('aider');
-        if (agentIds.length === 0) agentIds = ['antigravity', 'opencode'];
-      }
-
-      currentMaxTurns = maxTurns;
-
-      ws.send(JSON.stringify({
-        type: 'create_conversation',
-        data: {
-          title,
-          projectPath: projectPath || undefined,
-          orchestrationMode,
-          agentIds,
-          maxTurns
-        }
-      }));
-
-      closeModal();
-    }
-
-    function sendMessage() {
-      const input = document.getElementById('messageInput');
-      const content = input.value.trim();
-      if (!content) return;
-
-      if (!currentConversationId) {
-        pendingPrompt = content;
-        ws.send(JSON.stringify({
-          type: 'create_conversation',
-          data: {
-            title: content.substring(0, 45) + (content.length > 45 ? '...' : ''),
-            orchestrationMode: 'autonomous',
-            agentIds: ['antigravity', 'opencode']
-          }
-        }));
-      } else {
-        if (!isLoopRunning) {
-          startLoop(content);
-        } else {
-          ws.send(JSON.stringify({
-            type: 'send_message',
-            data: {
-              conversationId: currentConversationId,
-              content
-            }
-          }));
-        }
-      }
-
-      input.value = '';
-    }
-
-    function startLoop(initialPrompt) {
-      if (!currentConversationId) return;
-
-      const maxTurns = parseInt(document.getElementById('maxTurns')?.value) || 15;
-
-      ws.send(JSON.stringify({
-        type: 'start_loop',
-        data: {
-          conversationId: currentConversationId,
-          initialPrompt,
-          config: { maxTurns }
-        }
-      }));
-
-      isLoopRunning = true;
-      updateButtons();
-    }
-
-    function pauseLoop() {
-      if (!currentConversationId) return;
-      ws.send(JSON.stringify({
-        type: 'pause_loop',
-        data: { conversationId: currentConversationId }
-      }));
-      isLoopRunning = false;
-      updateButtons();
-      addLog('Ciclo pausado por el usuario', 'info');
-    }
-
-    function resumeLoop() {
-      if (!currentConversationId) return;
-      ws.send(JSON.stringify({
-        type: 'resume_loop',
-        data: { conversationId: currentConversationId }
-      }));
-      isLoopRunning = true;
-      updateButtons();
-      addLog('Ciclo reanudado', 'info');
-    }
-
-    function updateButtons() {
-      document.getElementById('pauseBtn').disabled = !isLoopRunning;
-      document.getElementById('resumeBtn').disabled = isLoopRunning;
-    }
-
-    function addMessageToChat(message) {
-      const container = document.getElementById('messages');
-      const div = document.createElement('div');
-
-      let senderClass = 'system';
-      let senderName = '⚙️ Sistema';
-
-      if (message.agentId === 'antigravity') {
-        senderClass = 'antigravity';
-        senderName = '🏛️ Google Antigravity <span style="font-size: 0.72rem; opacity: 0.8; font-weight: 500; margin-left: 6px; color: #d8b4fe;">[Google DeepMind Gemini • Arquitecto]</span>';
-      } else if (message.agentId === 'opencode') {
-        senderClass = 'opencode';
-        senderName = '💻 OpenCode Desktop <span style="font-size: 0.72rem; opacity: 0.8; font-weight: 500; margin-left: 6px; color: #86efac;">[Local Host :4096 • Build Agent]</span>';
-      } else if (message.agentId === 'interpreter') {
-        senderClass = 'interpreter';
-        senderName = '⚡ Open Interpreter <span style="font-size: 0.72rem; opacity: 0.8; font-weight: 500; margin-left: 6px; color: #7dd3fc;">[Local Terminal • QA & Code Runner]</span>';
-      } else if (message.agentId === 'aider') {
-        senderClass = 'aider';
-        senderName = '🐙 Aider Git Master <span style="font-size: 0.72rem; opacity: 0.8; font-weight: 500; margin-left: 6px; color: #fdba74;">[Git CLI 2.54 • Version Control]</span>';
-      } else if (message.agentId === 'user') {
-        senderClass = 'user';
-        senderName = '👤 Usuario';
-      }
-
-      div.className = `message ${senderClass}`;
-      
-      const parsedContent = (message.agentId === 'system' || message.agentId === 'user')
-        ? escapeHtml(message.content)
-        : marked.parse(message.content);
-
-      div.innerHTML = `
-        <div class="message-header">
-          <span>${senderName}</span>
-          <span>${new Date(message.timestamp).toLocaleTimeString()}</span>
-        </div>
-        <div class="message-content">${parsedContent}</div>
-      `;
-
-      container.appendChild(div);
-      container.scrollTop = container.scrollHeight;
-    }
-
-    function addLog(message, type = '') {
-      const logArea = document.getElementById('logArea');
-      const entry = document.createElement('div');
-      entry.className = `log-entry ${type}`;
-      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-      logArea.appendChild(entry);
-      logArea.scrollTop = logArea.scrollHeight;
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    function handleKeyPress(event) {
-      if (event.key === 'Enter') {
-        sendMessage();
-      }
-    }
-
-    connect();
-  </script>
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
