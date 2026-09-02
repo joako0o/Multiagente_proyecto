@@ -119,6 +119,27 @@ Ambas funciones son puras y están cubiertas por tests.
 
 No hay base de datos a propósito: el objetivo del proyecto es una herramienta local y auditable, y el Markdown es legible sin tooling.
 
+## 6b. Skills
+
+`src/skills/` implementa el estándar **Agent Skills** (`SKILL.md` con frontmatter `name`/`description` + cuerpo Markdown; opcionalmente `scripts/`, `references/`, `assets/`). Se eligió ese formato en vez de uno propio porque OpenHands (`load_project_skills`) y OpenCode (`/skill`) ya lo leen de `.agents/skills/` y porque existe un ecosistema de repositorios reutilizables.
+
+Piezas:
+
+| Módulo | Responsabilidad | Pureza |
+|---|---|---|
+| `skill-file.ts` | Parsear y validar un `SKILL.md` (reglas de `name`, recorte de `description` > 1024). | Pura salvo `readSkillFile`. |
+| `skill-library.ts` | `sync()` (git clone/pull por fuente), `list()` (catálogo con prioridad local → bundled → remotas), `materialize()` (copia a `<ws>/.agents/skills/<name>` + `README.md` + `.git/info/exclude`). | Disco y `git`. |
+| `skill-briefing.ts` | Texto para el arquitecto (catálogo + formato `[SKILLS: agente=a,b; …]`), `parseSkillAssignments`, y el dossier por agente (`renderBriefingForAgent`). | Pura. |
+| `skill-coordinator.ts` | Lo que llama el orquestador: sección de planificación, aplicar la etiqueta del arquitecto, preparar el turno (materializar + dossier). Con biblioteca ausente es neutro. | Orquesta las anteriores. |
+
+Decisiones:
+
+- **Dos vías de entrega según el agente.** `AgentDescriptor.loadsSkillsNatively` decide si el dossier es una referencia corta a la carpeta (OpenHands, OpenCode) o si se inyecta el cuerpo de la skill en el prompt con presupuesto de caracteres (Aider, Open Interpreter, Antigravity). Así no se duplica contexto para quien ya lo carga.
+- **OpenCode cachea el escaneo de skills por directorio.** Verificado en 1.18.26: las skills copiadas después de que el servidor conozca el workspace no aparecen hasta `POST /instance/dispose` (las sesiones siguen vivas). El adaptador lo hace cuando cambia el conjunto de skills del workspace.
+- **El usuario manda.** Las asignaciones del formulario se conservan; el arquitecto solo puede añadir (máximo 3 por agente, solo nombres del catálogo, solo agentes del equipo).
+- **Descripción como contrato.** El arquitecto decide solo con `name` + `description` (progressive disclosure del estándar); una skill con descripción vaga no se asignará bien. Las incluidas en `skills/` siguen la regla "qué hace y cuándo usarla".
+- **Licencias visibles, no filtradas.** El catálogo muestra `license`; no se bloquea ninguna porque el uso legítimo depende del contexto del usuario.
+
 ## 7. Panel web
 
 `web/app.js` es JavaScript sin framework, organizado en: estado → WebSocket → render → acciones → arranque. Principios:
@@ -164,6 +185,7 @@ tests/
 ├── config.test.ts               defaults y precedencia de variables
 ├── interpreter.test.ts          lista blanca de comandos del fallback y parseo del runner
 ├── openhands-parser.test.ts     parseo JSONL
+├── skills.test.ts               SKILL.md, biblioteca en disco, asignación y dossiers
 └── orchestrator.test.ts         ciclo completo con adaptadores falsos
 ```
 

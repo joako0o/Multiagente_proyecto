@@ -24,6 +24,7 @@ Sin dependencias externas: solo biblioteca estándar.
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -66,9 +67,10 @@ def call_gemini(messages: list) -> str:
 
 def mock_reply(messages: list) -> str:
     """Respuesta simulada de arquitecto. Distingue planificación de revisión por el contenido."""
-    last = (messages[-1].get("content", "") if messages else "").lower()
+    last = messages[-1].get("content", "") if messages else ""
+    lowered = last.lower()
 
-    if "turno de **revisión**" in last or "veredicto" in last:
+    if "turno de **revisión**" in lowered or "veredicto" in lowered:
         return (
             "### Revisión\n\n"
             "He revisado lo entregado por el equipo. La estructura es coherente con el plan y "
@@ -76,9 +78,18 @@ def mock_reply(messages: list) -> str:
             "VEREDICTO: APROBADO"
         )
 
+    # Si el prompt trae una biblioteca de skills, asigna las dos primeras que aparezcan
+    # (imita a un arquitecto real que elige del catálogo).
+    skills_line = ""
+    catalog = re.findall(r"^- `([a-z0-9-]+)` \(", last, flags=re.MULTILINE)
+    if catalog:
+        first, second = catalog[0], (catalog[1] if len(catalog) > 1 else catalog[0])
+        skills_line = f"[SKILLS: opencode={first}; interpreter={second}]\n"
+
     return (
-        "[EQUIPO: opencode, interpreter]\n\n"
-        "### Plan de trabajo\n\n"
+        "[EQUIPO: opencode, interpreter]\n"
+        + skills_line
+        + "\n### Plan de trabajo\n\n"
         "1. **Arquitectura:** módulo único con una función pública y un test que la ejercite.\n"
         "2. **OpenCode:** implementar el módulo y el test; documentar cómo ejecutarlo.\n"
         "3. **Open Interpreter:** ejecutar el test y reportar la salida real.\n\n"

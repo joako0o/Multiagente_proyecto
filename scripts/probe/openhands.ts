@@ -21,6 +21,7 @@ const base = {
 
 const task = {
   conversationId: 'probe',
+    skills: [],
   turn: 1,
   phase: 'DEVELOPMENT' as const,
   orchestrationMode: 'manual' as const,

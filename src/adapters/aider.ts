@@ -31,12 +31,13 @@
  *
  * Documentación: https://aider.chat/docs/scripting.html
  */
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { AgentTask } from '../types';
 import { AppConfig } from '../config';
 import { RunResult, run } from '../utils/shell';
+import { addToGitExclude } from '../utils/git';
 import { BaseCliAdapter, CliInvocation } from './base-cli-adapter';
 
 type AiderConfig = AppConfig['aider'];
@@ -90,7 +91,7 @@ export class AiderAdapter extends BaseCliAdapter {
 
   /** Sobrescribimos para añadir el estado de git al final de la respuesta. */
   async sendMessage(task: AgentTask): Promise<string> {
-    excludeAiderArtifacts(task.projectPath);
+    addToGitExclude(task.projectPath, ['.aider*'], 'Multi-Agent Bridge: artefactos de aider');
     const answer = await super.sendMessage(task);
     const gitSummary = await describeGitState(task.projectPath);
     return gitSummary ? `${answer}\n\n${gitSummary}` : answer;
@@ -129,24 +130,6 @@ export function cleanAiderOutput(stdout: string): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-}
-
-/**
- * Añade los artefactos de aider a `.git/info/exclude` del workspace (si es un
- * repo git y aún no están). Es idempotente y nunca lanza.
- */
-export function excludeAiderArtifacts(cwd: string): void {
-  try {
-    const infoDir = join(cwd, '.git', 'info');
-    if (!existsSync(join(cwd, '.git'))) return;
-    mkdirSync(infoDir, { recursive: true });
-    const excludeFile = join(infoDir, 'exclude');
-    const current = existsSync(excludeFile) ? readFileSync(excludeFile, 'utf-8') : '';
-    if (current.includes('.aider*')) return;
-    appendFileSync(excludeFile, `${current.endsWith('\n') || !current ? '' : '\n'}# Multi-Agent Bridge: artefactos de aider\n.aider*\n`);
-  } catch {
-    // no es crítico
-  }
 }
 
 /** Resumen corto de la rama actual y archivos modificados. Devuelve '' si no hay repo git. */

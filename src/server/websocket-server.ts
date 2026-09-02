@@ -13,11 +13,16 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { ClientCommand, ServerEvent } from '../types';
 import { Orchestrator } from '../core/orchestrator';
 import { AgentRegistry } from '../agents/registry';
+import { SkillCoordinator } from '../skills/skill-coordinator';
 
 export class ChatWebSocketServer {
   private wss?: WebSocketServer;
 
-  constructor(private readonly orchestrator: Orchestrator, private readonly registry: AgentRegistry) {
+  constructor(
+    private readonly orchestrator: Orchestrator,
+    private readonly registry: AgentRegistry,
+    private readonly skills: SkillCoordinator
+  ) {
     this.orchestrator.on('event', (event: ServerEvent) => this.broadcast(event));
   }
 
@@ -31,7 +36,8 @@ export class ChatWebSocketServer {
         type: 'connected',
         data: {
           agents: this.registry.describeAll(),
-          conversations: this.orchestrator.listConversations()
+          conversations: this.orchestrator.listConversations(),
+          skills: this.skills.summaries()
         }
       });
 
@@ -68,7 +74,8 @@ export class ChatWebSocketServer {
             agentIds: data.agentIds,
             projectPath: data.projectPath,
             orchestrationMode: data.orchestrationMode,
-            maxTurns: data.maxTurns !== undefined ? Number(data.maxTurns) : undefined
+            maxTurns: data.maxTurns !== undefined ? Number(data.maxTurns) : undefined,
+            skills: data.skills
           });
           // Solo al creador: el resto se enterará por los eventos del ciclo.
           this.send(socket, { type: 'conversation_created', conversationId: conversation.id, data: conversation });

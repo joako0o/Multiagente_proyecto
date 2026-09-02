@@ -14,42 +14,66 @@ import { Orchestrator } from '../core/orchestrator';
 import { HistoryWriter } from '../core/history-writer';
 import { createHttpRoutes } from './http-routes';
 import { ChatWebSocketServer } from './websocket-server';
+import { SkillLibrary } from '../skills/skill-library';
+import { SkillCoordinator } from '../skills/skill-coordinator';
 
-export const APP_VERSION = '3.0.0';
+export const APP_VERSION = '3.1.0';
 
 export class BridgeServer {
   private readonly app = express();
   private readonly httpServer: HttpServer;
   private readonly wsServer: ChatWebSocketServer;
+  private readonly skillLibrary?: SkillLibrary;
   readonly orchestrator: Orchestrator;
 
   constructor(private readonly config: AppConfig) {
     const registry = createAgentRegistry(config);
+
+    this.skillLibrary = config.skills.enabled
+      ? new SkillLibrary(config.skills.cacheDir, config.skills.sources, config.skills.bundledDirs)
+      : undefined;
+    const skills = new SkillCoordinator(this.skillLibrary);
+
     this.orchestrator = new Orchestrator(
       registry,
       new HistoryWriter(config.historyDir),
-      { maxTurns: config.loop.maxTurns, delayBetweenTurnsMs: config.loop.delayBetweenTurnsMs, autoStopOnError: false }
+      { maxTurns: config.loop.maxTurns, delayBetweenTurnsMs: config.loop.delayBetweenTurnsMs, autoStopOnError: false },
+      skills
     );
 
     this.app.use(express.json({ limit: '1mb' }));
-    this.app.use('/api', createHttpRoutes(this.orchestrator, registry, APP_VERSION));
+    this.app.use('/api', createHttpRoutes({ orchestrator: this.orchestrator, registry, skills, skillLibrary: this.skillLibrary, version: APP_VERSION }));
     this.app.use('/vendor', createVendorRoutes());
     this.app.use(express.static(resolveWebDir()));
 
     this.httpServer = createServer(this.app);
-    this.wsServer = new ChatWebSocketServer(this.orchestrator, registry);
+    this.wsServer = new ChatWebSocketServer(this.orchestrator, registry, skills);
     this.wsServer.attach(this.httpServer);
   }
 
-  start(): Promise<void> {
+  async start(): Promise<void> {
+    await this.syncSkills();
     const { host, port } = this.config.server;
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       this.httpServer.once('error', reject);
       this.httpServer.listen(port, host, () => {
-        printBanner(this.config);
+        printBanner(this.config, this.skillLibrary?.list().length ?? 0);
         resolve();
       });
     });
+  }
+
+  /** Clona/actualiza los repositorios de skills al arrancar (si está activado). Nunca impide arrancar. */
+  private async syncSkills(): Promise<void> {
+    if (!this.skillLibrary) return;
+    if (this.config.skills.syncOnStart) {
+      const results = await this.skillLibrary.sync();
+      for (const r of results) {
+        const status = r.ok ? r.action : `ERROR: ${r.detail}`;
+        console.log(`[Skills] ${r.sourceId}: ${status}${r.detail && r.ok ? ` (${r.detail})` : ''}`);
+      }
+    }
+    console.log(`[Skills] ${this.skillLibrary.list().length} skills disponibles en ${this.config.skills.cacheDir}`);
   }
 
   stop(): Promise<void> {
@@ -88,7 +112,7 @@ function createVendorRoutes(): express.Router {
   return router;
 }
 
-function printBanner(config: AppConfig): void {
+function printBanner(config: AppConfig, skillCount: number): void {
   const { host, port } = config.server;
   const displayHost = host === '0.0.0.0' ? 'localhost' : host;
   console.log([
@@ -98,6 +122,7 @@ function printBanner(config: AppConfig): void {
     `  Panel web      http://${displayHost}:${port}`,
     `  WebSocket      ws://${displayHost}:${port}/ws`,
     `  Estado agentes http://${displayHost}:${port}/api/agents/status`,
+    `  Skills         ${config.skills.enabled ? `${skillCount} disponibles · ${config.skills.sources.map(s => s.id).join(', ') || 'sin fuentes'}` : 'desactivadas'}`,
     `  Historial      ${config.historyDir}`,
     ''
   ].join('\n'));

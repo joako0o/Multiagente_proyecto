@@ -39,6 +39,7 @@ import { buildPrompt } from './prompt-builder';
 import { phaseForTurn } from './phases';
 import { parseTeamSelection, parseVerdict } from './verdict';
 import { normalizeProjectPath } from '../utils/paths';
+import { SkillCoordinator } from '../skills/skill-coordinator';
 
 export interface CreateConversationInput {
   title: string;
@@ -46,19 +47,25 @@ export interface CreateConversationInput {
   projectPath?: string;
   orchestrationMode?: OrchestrationMode;
   maxTurns?: number;
+  /** Asignación manual de skills (`agentId → nombres`). */
+  skills?: Record<string, string[]>;
 }
 
 export class Orchestrator extends EventEmitter {
   private readonly conversations = new Map<string, Conversation>();
   /** Conversaciones con un runLoop() en ejecución. Evita solapar ciclos. */
   private readonly running = new Set<string>();
+  private readonly skills: SkillCoordinator;
 
   constructor(
     private readonly registry: AgentRegistry,
     private readonly history: HistoryWriter,
-    private readonly defaults: LoopOptions
+    private readonly defaults: LoopOptions,
+    skills?: SkillCoordinator
   ) {
     super();
+    // Sin biblioteca configurada, el coordinador es neutro (no añade nada a los prompts).
+    this.skills = skills ?? new SkillCoordinator(undefined);
   }
 
   // ---------------------------------------------------------------------------
@@ -99,6 +106,7 @@ export class Orchestrator extends EventEmitter {
       projectPath: normalizeProjectPath(input.projectPath),
       currentTurn: 0,
       maxTurns: clampTurns(input.maxTurns ?? this.defaults.maxTurns),
+      skills: this.skills.sanitizeAssignments(input.skills, this.registry),
       createdAt: now,
       updatedAt: now
     };
@@ -244,11 +252,20 @@ export class Orchestrator extends EventEmitter {
    */
   private async executeTurn(conversation: Conversation, agent: Agent, options: LoopOptions): Promise<boolean> {
     const team = conversation.agents.map(id => this.registry.get(id)).filter((a): a is Agent => Boolean(a));
+    const isArchitect = agent.id === ARCHITECT_ID;
+    const isPlanningTurn = isArchitect && conversation.currentTurn === 0;
+
+    // Skills: el arquitecto ve el catálogo en planificación; cada agente recibe su dossier.
+    const skillsSection = isPlanningTurn
+      ? this.skills.sectionForArchitect(conversation)
+      : this.skills.prepareTurn(conversation, agent);
+
     const prompt = buildPrompt({
       conversation,
       agent,
       team,
-      displayName: id => this.registry.displayName(id)
+      displayName: id => this.registry.displayName(id),
+      skillsSection
     });
 
     let response: string;
@@ -256,6 +273,7 @@ export class Orchestrator extends EventEmitter {
       response = await agent.adapter.sendMessage({
         conversationId: conversation.id,
         prompt,
+        skills: this.skills.skillsFor(conversation, agent.id),
         projectPath: conversation.projectPath,
         phase: conversation.phase,
         orchestrationMode: conversation.orchestrationMode,
@@ -268,14 +286,20 @@ export class Orchestrator extends EventEmitter {
       return false;
     }
 
-    const isArchitect = agent.id === ARCHITECT_ID;
     const metadata: MessageMetadata = {
       phase: conversation.phase,
       sourceBackend: agent.adapter.getSourceBackend()
     };
 
-    if (isArchitect && conversation.currentTurn === 0 && conversation.orchestrationMode === 'autonomous') {
+    if (isPlanningTurn && conversation.orchestrationMode === 'autonomous') {
       this.applyTeamSelection(conversation, response);
+    }
+    if (isPlanningTurn) {
+      const summary = this.skills.applyArchitectAssignments(conversation, response, this.registry);
+      if (summary) {
+        console.log(`[Orchestrator] skills asignadas por el arquitecto: ${summary}`);
+        this.addMessage(conversation.id, 'system', `🧰 Skills asignadas — ${summary}`, 'system');
+      }
     }
 
     let goalReached = false;
@@ -358,6 +382,7 @@ export function summarize(c: Conversation): ConversationSummary {
     currentTurn: c.currentTurn,
     maxTurns: c.maxTurns,
     messageCount: c.messages.length,
+    skills: c.skills,
     updatedAt: c.updatedAt
   };
 }

@@ -35,6 +35,8 @@ export class OpenCodeAdapter implements AgentAdapter {
   /** Sesión de OpenCode por conversación nuestra. */
   private readonly sessions = new Map<string, string>();
   private autoStartAttempted = false;
+  /** Skills que OpenCode ya conoce por workspace (para saber cuándo hay que refrescar su caché). */
+  private readonly knownSkills = new Map<string, string>();
 
   constructor(private readonly config: OpenCodeConfig) {}
 
@@ -69,6 +71,8 @@ export class OpenCodeAdapter implements AgentAdapter {
       return `⚠️ **OpenCode: servidor no disponible** en \`${this.config.url}\`.\n\n` +
         `Arranca OpenCode con \`opencode serve --port 4096\` y reanuda el ciclo.`;
     }
+
+    await this.refreshSkillsIfNeeded(task);
 
     let lastError = '';
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -153,6 +157,28 @@ export class OpenCodeAdapter implements AgentAdapter {
       }
     }
     return false;
+  }
+
+  /**
+   * OpenCode escanea `.agents/skills/` una sola vez por directorio y cachea el
+   * resultado, así que las skills que el bridge copia después de que el
+   * servidor conozca el workspace no se ven. `POST /instance/dispose` descarta
+   * esa caché (las sesiones siguen siendo válidas; verificado en 1.18.26).
+   */
+  private async refreshSkillsIfNeeded(task: AgentTask): Promise<void> {
+    const wanted = [...task.skills].sort().join(',');
+    if (this.knownSkills.get(task.projectPath) === wanted) return;
+    try {
+      if (task.skills.length) {
+        await fetch(`${this.config.url}/instance/dispose?${this.directoryQuery(task)}`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(10_000)
+        });
+      }
+      this.knownSkills.set(task.projectPath, wanted);
+    } catch (err) {
+      console.warn(`[OpenCode] no se pudo refrescar la caché de skills: ${(err as Error).message}`);
+    }
   }
 
   private async getOrCreateSession(task: AgentTask): Promise<string> {

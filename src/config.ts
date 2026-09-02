@@ -88,6 +88,22 @@ export interface AppConfig {
 
   /** Carpeta donde se guarda el historial `.md` de cada sesión. */
   historyDir: string;
+
+  /**
+   * Biblioteca de skills (estándar Agent Skills, archivos `SKILL.md`).
+   * Los repositorios se clonan en `cacheDir` y el arquitecto asigna skills a
+   * cada agente en el turno de planificación.
+   */
+  skills: {
+    enabled: boolean;
+    cacheDir: string;
+    /** Repositorios Git con skills. Formato en .env: `owner/repo[@ref]` separados por comas, o URLs completas. */
+    sources: Array<{ id: string; url: string; ref?: string }>;
+    /** Sincronizar (clone/pull) al arrancar el servidor. */
+    syncOnStart: boolean;
+    /** Carpetas del proyecto con skills incluidas (por defecto `./skills`). */
+    bundledDirs: string[];
+  };
 }
 
 type Env = Record<string, string | undefined>;
@@ -164,6 +180,35 @@ export function loadConfig(env: Env = process.env): AppConfig {
       maxTurns: int(env, 'LOOP_MAX_TURNS', 15),
       delayBetweenTurnsMs: int(env, 'LOOP_DELAY_MS', 3000)
     },
-    historyDir: str(env, 'HISTORY_DIR', join(process.cwd(), 'conversations'))
+    historyDir: str(env, 'HISTORY_DIR', join(process.cwd(), 'conversations')),
+    skills: {
+      enabled: bool(env, 'SKILLS_ENABLED', true),
+      cacheDir: str(env, 'SKILLS_CACHE_DIR', join(process.cwd(), '.skills-cache')),
+      sources: parseSkillSources(str(env, 'SKILLS_SOURCES', 'anthropics/skills')),
+      syncOnStart: bool(env, 'SKILLS_SYNC_ON_START', true),
+      bundledDirs: str(env, 'SKILLS_BUNDLED_DIRS', join(process.cwd(), 'skills')).split(',').map(s => s.trim()).filter(Boolean)
+    }
   };
+}
+
+/**
+ * `owner/repo`, `owner/repo@ref` o URL completa (`https://…/repo.git[@ref]`), separados por comas.
+ * El id es `owner/repo` para poder mostrarlo en el panel.
+ */
+export function parseSkillSources(raw: string): Array<{ id: string; url: string; ref?: string }> {
+  return raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const at = entry.lastIndexOf('@');
+      const hasRef = at > entry.indexOf('/') && !entry.slice(at + 1).includes('/');
+      const spec = hasRef ? entry.slice(0, at) : entry;
+      const ref = hasRef ? entry.slice(at + 1) : undefined;
+      if (/^https?:\/\//.test(spec) || /^git@/.test(spec)) {
+        const id = spec.replace(/\.git$/, '').split(/[/:]/).slice(-2).join('/');
+        return { id, url: spec, ref };
+      }
+      return { id: spec, url: `https://github.com/${spec}.git`, ref };
+    });
 }

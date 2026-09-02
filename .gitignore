@@ -12,6 +12,9 @@ node_modules/
 # Historial de sesiones generado en tiempo de ejecución
 conversations/
 
+# Repositorios de skills clonados (se regeneran con SKILLS_SYNC_ON_START o POST /api/skills/sync)
+.skills-cache/
+
 # Logs
 *.log
 npm-debug.log*

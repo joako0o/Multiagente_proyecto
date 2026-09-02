@@ -14,6 +14,7 @@ de una herramienta.
 | `opencode-autostart.ts` | Que el adaptador levante `opencode serve` cuando no hay servidor. | `opencode` en el PATH |
 | `openhands.ts` | `OpenHandsAdapter` en tres escenarios (settings guardados / por entorno / mal configurado). | CLI real o `fake-openhands.py` |
 | `fake-openhands.py` | Doble del CLI `openhands --headless --json` que reproduce sus salidas reales (JSONL con esquema del SDK, mensajes de error de settings). | Python 3 |
+| `skills-prompt.ts` | Imprime lo que ve el arquitecto (catálogo) y el dossier de skills de un agente nativo y de uno no nativo, con la biblioteca real. | biblioteca sincronizada |
 
 ## Receta completa sin credenciales
 

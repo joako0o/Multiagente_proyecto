@@ -25,6 +25,7 @@ import { AiderAdapter } from '../../src/adapters/aider';
   console.log('status:', JSON.stringify(await adapter.getStatus()));
   const out = await adapter.sendMessage({
     conversationId: 'probe',
+    skills: [],
     turn: 1,
     phase: 'DEVELOPMENT',
     orchestrationMode: 'manual',

@@ -24,6 +24,13 @@ export interface PromptContext {
   team: Agent[];
   /** Función para obtener el nombre visible de un agentId (incluye `user`). */
   displayName: (agentId: string) => string;
+  /**
+   * Bloque de skills ya renderizado (ver `src/skills/skill-briefing.ts`):
+   *  - en el turno de planificación del arquitecto: catálogo + instrucciones de asignación;
+   *  - en el turno de un agente: dossier de sus skills asignadas.
+   * Vacío si el subsistema de skills está desactivado o no hay nada que mostrar.
+   */
+  skillsSection?: string;
 }
 
 export function buildPrompt(ctx: PromptContext): string {
@@ -45,6 +52,7 @@ export function buildPrompt(ctx: PromptContext): string {
     ``,
     roleInstructions(ctx, teammates),
     ``,
+    ...(ctx.skillsSection ? [ctx.skillsSection, ``] : []),
     `## Objetivo original del usuario`,
     ``,
     originalGoal,
@@ -125,6 +133,10 @@ function architectPlanningInstructions(ctx: PromptContext, teammates: Agent[]): 
     );
   } else {
     lines.push(`4. El equipo ya está definido: ${teammates.map(a => `${a.name} (${a.role})`).join('; ')}.`);
+  }
+
+  if (ctx.skillsSection) {
+    lines.push(`5. **Asigna skills** a cada agente siguiendo las instrucciones de la sección "Biblioteca de skills" más abajo.`);
   }
 
   return lines.join('\n');

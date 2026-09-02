@@ -27,6 +27,13 @@
         <button class="btn btn-ghost btn-small" id="refreshStatusBtn" type="button">↻ Comprobar disponibilidad</button>
       </section>
 
+      <section id="skillsSection">
+        <h2 class="section-title">Skills <span class="muted" id="skillsCount"></span></h2>
+        <p class="muted" id="skillsHint">Instrucciones y herramientas reutilizables (formato Agent Skills) que el arquitecto reparte entre los agentes.</p>
+        <ul class="skill-list" id="skillList"></ul>
+        <button class="btn btn-ghost btn-small" id="syncSkillsBtn" type="button">⇣ Sincronizar repositorios</button>
+      </section>
+
       <section>
         <h2 class="section-title">Sesiones</h2>
         <ul class="conversation-list" id="conversationList">
@@ -58,6 +65,7 @@
             <span id="modeInfo">Modo: —</span>
             <span id="turnInfo">Turno: —</span>
           </div>
+          <div class="session-skills" id="sessionSkills" hidden></div>
         </div>
         <span class="phase-badge" id="phaseBadge">—</span>
       </div>
@@ -80,6 +88,18 @@
       </form>
     </section>
   </main>
+
+  <!-- ───────────── Modal: detalle de skill ───────────── -->
+  <div class="modal" id="skillModal" hidden>
+    <div class="modal-content skill-detail">
+      <h2 id="skillModalTitle">Skill</h2>
+      <p class="muted" id="skillModalMeta"></p>
+      <div class="message-content" id="skillModalBody"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" type="button" id="closeSkillBtn">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ───────────── Modal: nueva sesión ───────────── -->
   <div class="modal" id="newSessionModal" hidden>
@@ -107,6 +127,11 @@
       <fieldset class="field" id="teamField" hidden>
         <legend>Agentes participantes</legend>
         <div class="team-grid" id="teamCheckboxes"></div>
+      </fieldset>
+
+      <fieldset class="field" id="skillsField" hidden>
+        <legend>Skills por agente <span class="muted">(opcional — en modo autónomo el arquitecto también puede asignarlas)</span></legend>
+        <div class="skills-assign" id="skillsAssign"></div>
       </fieldset>
 
       <label class="field">

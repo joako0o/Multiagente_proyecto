@@ -14,6 +14,7 @@ export const AGENT_CATALOG: Record<AgentType, AgentDescriptor> = {
     name: 'Antigravity',
     emoji: '🏛️',
     shortLabel: 'LLM · Arquitecto',
+    loadsSkillsNatively: false,
     role: 'Arquitecto y líder técnico. Planifica en el primer turno, revisa el trabajo del equipo en los siguientes y emite el veredicto final.'
   },
   opencode: {
@@ -22,6 +23,7 @@ export const AGENT_CATALOG: Record<AgentType, AgentDescriptor> = {
     name: 'OpenCode',
     emoji: '💻',
     shortLabel: 'Servidor local :4096',
+    loadsSkillsNatively: true,
     role: 'Desarrollador principal. Implementa el código en el workspace siguiendo el plan del arquitecto.'
   },
   openhands: {
@@ -30,6 +32,7 @@ export const AGENT_CATALOG: Record<AgentType, AgentDescriptor> = {
     name: 'OpenHands',
     emoji: '🤖',
     shortLabel: 'CLI headless',
+    loadsSkillsNatively: true,
     role: 'Ingeniero autónomo. Resuelve tareas completas de punta a punta: explora el repo, edita archivos y ejecuta comandos.'
   },
   aider: {
@@ -38,6 +41,7 @@ export const AGENT_CATALOG: Record<AgentType, AgentDescriptor> = {
     name: 'Aider',
     emoji: '🐙',
     shortLabel: 'CLI · Git',
+    loadsSkillsNatively: false,
     role: 'Editor de código orientado a Git. Aplica cambios precisos sobre archivos concretos y prepara los commits.'
   },
   interpreter: {
@@ -46,6 +50,7 @@ export const AGENT_CATALOG: Record<AgentType, AgentDescriptor> = {
     name: 'Open Interpreter',
     emoji: '⚡',
     shortLabel: 'CLI · Terminal / QA',
+    loadsSkillsNatively: false,
     role: 'Ejecutor y QA. Corre pruebas, scripts y validaciones en el entorno real y reporta los resultados.'
   }
 };

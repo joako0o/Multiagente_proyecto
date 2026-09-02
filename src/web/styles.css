@@ -389,3 +389,53 @@ button { font: inherit; }
 }
 .team-grid label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; cursor: pointer; }
 .team-grid label.locked { opacity: 0.6; cursor: default; }
+
+/* ----- Skills ------------------------------------------------------------ */
+
+.skill-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; max-height: 220px; overflow-y: auto; margin-top: 0.4rem; }
+#skillsHint { margin-bottom: 0.2rem; line-height: 1.35; }
+
+.skill-item {
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.skill-item:hover { border-color: var(--border); background: rgba(255, 255, 255, 0.06); }
+.skill-item .name { font-family: var(--mono); font-weight: 600; color: #fcd34d; }
+.skill-item .source { color: var(--text-muted); font-size: 0.68rem; margin-left: 0.3rem; }
+.skill-item p { color: var(--text-muted); font-size: 0.7rem; line-height: 1.35; margin-top: 0.15rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+.session-skills { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem; font-size: 0.7rem; }
+.session-skills .chip {
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(252, 211, 77, 0.35);
+  background: rgba(252, 211, 77, 0.08);
+  color: #fde68a;
+  font-family: var(--mono);
+}
+.session-skills .chip b { color: var(--text); font-family: inherit; font-weight: 600; }
+
+.skills-assign { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.7rem; border: 1px solid var(--border); border-radius: 6px; background: rgba(0, 0, 0, 0.2); max-height: 260px; overflow-y: auto; }
+.skills-assign .agent-row { display: grid; grid-template-columns: 130px 1fr; gap: 0.5rem; align-items: start; }
+.skills-assign .agent-row > span { font-size: 0.82rem; padding-top: 0.1rem; }
+.skills-assign .options { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.skills-assign .options label {
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.skills-assign .options label:has(input:checked) { border-color: rgba(252, 211, 77, 0.6); background: rgba(252, 211, 77, 0.1); color: #fde68a; }
+.skills-assign .options input { margin: 0; }
+
+.skill-detail { width: 720px; }
+.skill-detail .message-content { max-height: 55vh; overflow-y: auto; font-size: 0.85rem; }

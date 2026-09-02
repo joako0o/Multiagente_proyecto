@@ -20,7 +20,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
       { id: 'm1', conversationId: 'c1', agentId: 'user', role: 'user', content: 'Crear una API', timestamp: new Date() }
     ],
     status: 'active', phase: 'PLANNING', orchestrationMode: 'manual', projectPath: '/tmp/demo',
-    currentTurn: 0, maxTurns: 10, createdAt: new Date(), updatedAt: new Date(), ...overrides
+    currentTurn: 0, maxTurns: 10, skills: {}, createdAt: new Date(), updatedAt: new Date(), ...overrides
   };
 }
 

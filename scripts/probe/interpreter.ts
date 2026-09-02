@@ -26,6 +26,7 @@ import { InterpreterAdapter } from '../../src/adapters/interpreter';
   console.log('status:', JSON.stringify(await adapter.getStatus()));
   const out = await adapter.sendMessage({
     conversationId: 'probe',
+    skills: [],
     turn: 2,
     phase: 'EXECUTION',
     orchestrationMode: 'manual',

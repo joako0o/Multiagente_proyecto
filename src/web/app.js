@@ -23,6 +23,8 @@ const state = {
   agents: [],
   /** Resúmenes de sesiones: [{ id, title, status, phase, ... }] */
   conversations: [],
+  /** Catálogo de skills: [{ name, description, sourceId, license, fileCount }] */
+  skills: [],
   /** Sesión abierta en el panel. */
   currentId: null,
   currentStatus: 'idle',
@@ -89,8 +91,11 @@ function handleServerEvent(event) {
     case 'connected':
       state.agents = event.data.agents;
       state.conversations = event.data.conversations;
+      state.skills = event.data.skills || [];
       renderAgents();
       renderTeamCheckboxes();
+      renderSkills();
+      renderSkillAssignments();
       renderConversations();
       refreshAgentStatus();
       // Reabrir la última sesión tras una reconexión o recarga.
@@ -113,6 +118,8 @@ function handleServerEvent(event) {
     case 'message':
       if (isCurrent) appendMessage(event.data);
       if (event.data.role === 'agent') log(`${agentName(event.data.agentId)} respondió`, 'info');
+      // El arquitecto puede haber asignado skills o redefinido el equipo: refrescamos la cabecera.
+      if (isCurrent && event.data.role === 'system') refreshSessionHeader();
       break;
 
     case 'turn_change':
@@ -213,6 +220,111 @@ function renderTeamCheckboxes() {
   }
 }
 
+/* --- Skills ------------------------------------------------------------- */
+
+function renderSkills() {
+  const list = $('skillList');
+  list.innerHTML = '';
+  $('skillsCount').textContent = state.skills.length ? `(${state.skills.length})` : '';
+  if (!state.skills.length) {
+    list.innerHTML = '<li class="muted">Sin skills. Configura SKILLS_SOURCES en .env o añade carpetas en .skills-cache/local/.</li>';
+    return;
+  }
+  for (const skill of state.skills) {
+    const li = document.createElement('li');
+    li.className = 'skill-item';
+    li.title = 'Ver instrucciones';
+    li.innerHTML = `
+      <span class="name">${escapeHtml(skill.name)}</span><span class="source">${escapeHtml(skill.sourceId)}${skill.fileCount ? ` · ${skill.fileCount} archivo(s)` : ''}</span>
+      <p>${escapeHtml(skill.description)}</p>`;
+    li.addEventListener('click', () => openSkill(skill.name));
+    list.appendChild(li);
+  }
+}
+
+/** Filas "agente → checkboxes de skills" del formulario de nueva sesión. */
+function renderSkillAssignments() {
+  const container = $('skillsAssign');
+  container.innerHTML = '';
+  $('skillsField').hidden = !state.skills.length;
+  if (!state.skills.length) return;
+
+  for (const agent of state.agents) {
+    if (agent.id === 'antigravity') continue; // el arquitecto asigna, no ejecuta skills
+    const row = document.createElement('div');
+    row.className = 'agent-row';
+    row.dataset.agent = agent.id;
+    row.innerHTML = `<span>${agent.emoji} ${escapeHtml(agent.name)}</span><div class="options"></div>`;
+    const options = row.querySelector('.options');
+    for (const skill of state.skills) {
+      const label = document.createElement('label');
+      label.title = skill.description;
+      label.innerHTML = `<input type="checkbox" value="${escapeHtml(skill.name)}"> ${escapeHtml(skill.name)}`;
+      options.appendChild(label);
+    }
+    container.appendChild(row);
+  }
+}
+
+/** Lee el formulario → { agentId: [skill, ...] } (solo agentes con alguna marcada). */
+function collectSkillAssignments() {
+  const result = {};
+  for (const row of $('skillsAssign').querySelectorAll('.agent-row')) {
+    const names = [...row.querySelectorAll('input:checked')].map(i => i.value);
+    if (names.length) result[row.dataset.agent] = names;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
+function renderSessionSkills(assignments) {
+  const box = $('sessionSkills');
+  const entries = Object.entries(assignments || {}).filter(([, names]) => names.length);
+  box.hidden = !entries.length;
+  box.innerHTML = entries
+    .map(([agentId, names]) => `<span class="chip"><b>${agentName(agentId)}</b> → ${names.map(escapeHtml).join(', ')}</span>`)
+    .join('');
+}
+
+async function refreshSessionHeader() {
+  if (!state.currentId) return;
+  try {
+    const conv = await fetch(`/api/conversations/${state.currentId}`).then(r => r.json());
+    renderSessionSkills(conv.skills);
+  } catch { /* no crítico */ }
+}
+
+async function openSkill(name) {
+  try {
+    const skill = await fetch(`/api/skills/${encodeURIComponent(name)}`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+    $('skillModalTitle').textContent = skill.name;
+    $('skillModalMeta').textContent = [skill.sourceId, skill.license, skill.files.length ? `${skill.files.length} archivo(s): ${skill.files.slice(0, 6).join(', ')}${skill.files.length > 6 ? '…' : ''}` : 'solo SKILL.md']
+      .filter(Boolean).join(' · ');
+    $('skillModalBody').innerHTML = DOMPurify.sanitize(marked.parse(skill.body));
+    $('skillModal').hidden = false;
+  } catch (err) {
+    log(`No se pudo abrir la skill: ${err.message}`, 'err');
+  }
+}
+
+async function syncSkills() {
+  const btn = $('syncSkillsBtn');
+  btn.disabled = true;
+  btn.textContent = '⇣ Sincronizando…';
+  try {
+    const data = await fetch('/api/skills/sync', { method: 'POST' }).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    state.skills = data.skills;
+    renderSkills();
+    renderSkillAssignments();
+    for (const r of data.results) log(`Skills ${r.sourceId}: ${r.action}${r.detail ? ` (${r.detail})` : ''}`, r.ok ? 'ok' : 'err');
+  } catch (err) {
+    log(`Error sincronizando skills: ${err.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⇣ Sincronizar repositorios';
+  }
+}
+
 /* --- Sesiones ----------------------------------------------------------- */
 
 function upsertConversation(conv) {
@@ -273,6 +385,7 @@ async function openConversation(id) {
     $('modeInfo').textContent = `Modo: ${conv.orchestrationMode === 'autonomous' ? 'autónomo' : 'manual'}`;
     $('turnInfo').textContent = `Turno: ${conv.currentTurn} / ${conv.maxTurns}`;
     setPhase(conv.phase);
+    renderSessionSkills(conv.skills);
 
     const container = $('messages');
     container.innerHTML = '';
@@ -380,7 +493,8 @@ function createSessionFromForm(event) {
       projectPath: $('sessionProjectPath').value.trim() || undefined,
       orchestrationMode: mode,
       agentIds,
-      maxTurns: Number($('sessionMaxTurns').value) || 15
+      maxTurns: Number($('sessionMaxTurns').value) || 15,
+      skills: collectSkillAssignments()
     }
   });
   if (ok) closeModal();
@@ -432,8 +546,11 @@ $('composer').addEventListener('submit', submitComposer);
 $('pauseBtn').addEventListener('click', pauseLoop);
 $('resumeBtn').addEventListener('click', resumeLoop);
 $('refreshStatusBtn').addEventListener('click', refreshAgentStatus);
+$('syncSkillsBtn').addEventListener('click', syncSkills);
+$('closeSkillBtn').addEventListener('click', () => { $('skillModal').hidden = true; });
+$('skillModal').addEventListener('click', (e) => { if (e.target.id === 'skillModal') $('skillModal').hidden = true; });
 $('newSessionModal').addEventListener('click', (e) => { if (e.target.id === 'newSessionModal') closeModal(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModal(); $('skillModal').hidden = true; } });
 
 updateButtons();
 connect();

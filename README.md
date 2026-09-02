@@ -57,6 +57,37 @@ ANTIGRAVITY_PROVIDER=openai npm start                  # terminal 2
 - **Autónomo** — Antigravity elige el equipo en el primer turno con la etiqueta `[EQUIPO: opencode, interpreter]`.
 - **Manual** — tú marcas qué agentes participan. El arquitecto siempre está.
 
+## Skills: equipar a cada agente
+
+Una **skill** es una carpeta con un `SKILL.md` (instrucciones + descripción de cuándo usarla) y, opcionalmente, `scripts/`, `references/` y `assets/`. Es el estándar [Agent Skills](https://agentskills.io/specification), el mismo que usan Claude Code, OpenHands y OpenCode, así que puedes reutilizar directamente las que hay publicadas en GitHub.
+
+```
+ .env: SKILLS_SOURCES=anthropics/skills,microsoft/skills
+                │
+                ▼  git clone (al arrancar o con "Sincronizar")
+   .skills-cache/                 skills/ (incluidas)           .skills-cache/local/ (tuyas)
+        │                              │                              │
+        └──────────────┬───────────────┴──────────────────────────────┘
+                       ▼
+             Biblioteca (catálogo: nombre + descripción)
+                       │
+   turno 0  ──────────►│  El arquitecto ve el catálogo y responde:
+                       │  [SKILLS: opencode=visualizacion-d3; interpreter=econometria-series-temporales]
+                       ▼
+        <workspace>/.agents/skills/<name>/   ← copiadas antes del turno de cada agente
+                       │
+        ┌──────────────┴──────────────┐
+        ▼                             ▼
+  OpenHands / OpenCode          Aider / Open Interpreter / Antigravity
+  las cargan solos de esa       reciben en el prompt: "tu rol es X, estas son tus
+  carpeta (soporte nativo)      skills, aquí están sus instrucciones y archivos"
+```
+
+- **Tú también puedes asignarlas** en el formulario de nueva sesión (por agente). En modo autónomo el arquitecto puede ampliar tu asignación, nunca quitarla.
+- **Incluidas de serie** en [`skills/`](skills/): `econometria-series-temporales`, `api-financiera-cliente`, `visualizacion-d3`. Añade las tuyas creando otra carpeta ahí (o en `.skills-cache/local/` si no quieres versionarlas).
+- **Licencias**: cada skill declara la suya en el frontmatter (el panel la muestra). Las de `anthropics/skills` mezclan Apache-2.0 y propietarias; revísalas antes de usarlas en algo que distribuyas.
+- La carpeta `.agents/skills/` del workspace se añade a `.git/info/exclude` del proyecto, así que no aparece en tu `git status`.
+
 ## Cómo funciona un ciclo
 
 ```
@@ -83,6 +114,8 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 | `INTERPRETER_PYTHON` | `python3` | Python donde está instalado `open-interpreter` (p. ej. un venv) |
 | `AIDER_AUTO_COMMITS` | `false` | Si Aider hace commit automático |
 | `LOOP_MAX_TURNS` / `LOOP_DELAY_MS` | `15` / `3000` | Ciclo por defecto |
+| `SKILLS_SOURCES` | `anthropics/skills` | Repositorios de skills (`owner/repo[@ref]` o URL, separados por comas) |
+| `SKILLS_CACHE_DIR` / `SKILLS_SYNC_ON_START` | `./.skills-cache` / `true` | Dónde se clonan y si se actualizan al arrancar |
 
 ## Scripts
 
@@ -99,7 +132,7 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 
 ## API
 
-**REST** (solo lectura): `GET /api/health`, `/api/agents`, `/api/agents/status`, `/api/conversations`, `/api/conversations/:id`, `/api/phases`.
+**REST**: `GET /api/health`, `/api/agents`, `/api/agents/status`, `/api/conversations`, `/api/conversations/:id`, `/api/phases`, `/api/skills`, `/api/skills/:name`; `POST /api/skills/sync` (vuelve a clonar/actualizar los repositorios de skills).
 
 **WebSocket** `/ws` — comandos del cliente: `create_conversation`, `start_loop`, `send_message`, `pause_loop`, `resume_loop`. Eventos del servidor: `connected`, `conversation_created`, `message`, `turn_change`, `phase_change`, `status`, `error`. Tipos exactos en [`src/types/index.ts`](src/types/index.ts).
 
@@ -126,16 +159,22 @@ src/
 │   ├── phases.ts          Regla turno/agente → fase
 │   ├── verdict.ts         Parseo de VEREDICTO y [EQUIPO]
 │   └── history-writer.ts  Persistencia .md
+├── skills/
+│   ├── skill-file.ts      Parseo/validación de SKILL.md (estándar Agent Skills)
+│   ├── skill-library.ts   Clona repos, indexa el catálogo, materializa en el workspace
+│   ├── skill-briefing.ts  Catálogo para el arquitecto, parseo de [SKILLS], dossier por agente
+│   └── skill-coordinator.ts  Enlace con el orquestador (qué ve cada agente en su turno)
 ├── server/
 │   ├── index.ts           Express + composición de dependencias
 │   ├── http-routes.ts     API REST
 │   └── websocket-server.ts
-├── utils/                 shell (procesos externos), paths
+├── utils/                 shell (procesos externos), paths, git
 ├── web/                   Panel: index.html, styles.css, app.js (sin framework)
 └── scripts/
     ├── antigravity_bridge.py   Servidor OpenAI-compatible (Gemini o mock)
     └── interpreter_runner.py   Puente hacia el paquete Python de Open Interpreter
-tests/                     node:test, 50 casos, sin dependencias externas
+skills/                    Skills incluidas (econometría, APIs financieras, d3.js)
+tests/                     node:test, 72 casos, sin dependencias externas
 scripts/probe/             Sondas manuales contra herramientas reales + dobles (fake-llm, fake-openhands)
 docs/ARCHITECTURE.md       Decisiones de diseño y guía para extender
 ```
