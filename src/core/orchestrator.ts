@@ -41,6 +41,9 @@ import { phaseForTurn } from './phases';
 import { parseNextAgent, parseTeamSelection, parseVerdict } from './verdict';
 import { normalizeProjectPath } from '../utils/paths';
 import { SkillCoordinator } from '../skills/skill-coordinator';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('Orchestrator');
 
 export interface CreateConversationInput {
   title: string;
@@ -266,7 +269,7 @@ export class Orchestrator extends EventEmitter {
 
     this.runLoop(conversation, loopOptions)
       .catch((err: Error) => {
-        console.error(`[Orchestrator] ciclo interrumpido: ${err.message}`);
+        log.error('ciclo interrumpido', err);
         this.addMessage(conversation.id, 'system', `⚠️ Ciclo interrumpido: ${err.message}`, 'system');
         this.setStatus(conversation, 'paused');
         this.emitEvent({ type: 'error', conversationId: conversation.id, data: { message: err.message } });
@@ -386,7 +389,7 @@ export class Orchestrator extends EventEmitter {
     if (isPlanningTurn) {
       const summary = this.skills.applyArchitectAssignments(conversation, response, this.registry);
       if (summary) {
-        console.log(`[Orchestrator] skills asignadas por el arquitecto: ${summary}`);
+        log.info(`skills asignadas por el arquitecto: ${summary}`);
         this.addMessage(conversation.id, 'system', `🧰 Skills asignadas — ${summary}`, 'system');
       }
     }
@@ -402,7 +405,7 @@ export class Orchestrator extends EventEmitter {
       const next = parseNextAgent(response, id => conversation.agents.includes(id) && id !== ARCHITECT_ID);
       if (next && !goalReached) {
         conversation.nextAgentId = next;
-        console.log(`[Orchestrator] el arquitecto pasa el turno a ${this.registry.displayName(next)}`);
+        log.info(`el arquitecto pasa el turno a ${this.registry.displayName(next)}`);
       }
     }
 
@@ -417,7 +420,7 @@ export class Orchestrator extends EventEmitter {
 
     conversation.agents = selected;
     const names = selected.map(id => this.registry.displayName(id)).join(', ');
-    console.log(`[Orchestrator] equipo elegido por el arquitecto: ${names}`);
+    log.info(`equipo elegido por el arquitecto: ${names}`);
     this.addMessage(conversation.id, 'system', `🧠 El arquitecto definió el equipo: ${names}`, 'system');
   }
 

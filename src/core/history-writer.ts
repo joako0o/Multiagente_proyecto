@@ -13,6 +13,9 @@ import { Conversation, ConversationMessage } from '../types';
 import { AGENT_CATALOG, isAgentType } from '../agents/catalog';
 import { PHASE_LABELS } from './phases';
 import { toSafeFileName } from '../utils/paths';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('HistoryWriter');
 
 export class HistoryWriter {
   constructor(private readonly historyDir: string) {}
@@ -31,7 +34,7 @@ export class HistoryWriter {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       writeFileSync(filePath, renderMarkdown(conversation), 'utf-8');
     } catch (err) {
-      console.error(`[HistoryWriter] no se pudo guardar el historial: ${(err as Error).message}`);
+      log.error('no se pudo guardar el historial', err as Error);
     }
   }
 }

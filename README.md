@@ -139,6 +139,7 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 | `SKILLS_SOURCES` | 4 repos (docs, datos, ciencia, ingeniería) | Repositorios de skills (`owner/repo[@ref]` o URL, separados por comas) |
 | `SKILLS_CACHE_DIR` / `SKILLS_SYNC_ON_START` | `./.skills-cache` / `true` | Dónde se clonan y si se actualizan al arrancar |
 | `HISTORY_DIR` / `SESSIONS_DIR` | `./conversations` / `./conversations/.sessions` | Historial `.md` y estado `.json` de las sesiones |
+| `LOG_LEVEL` | `info` | `debug` muestra cada skill omitida, conexiones WS, etc. |
 
 ## Scripts
 
@@ -194,13 +195,13 @@ src/
 │   ├── index.ts           Express + composición de dependencias
 │   ├── http-routes.ts     API REST
 │   └── websocket-server.ts
-├── utils/                 shell (procesos externos), paths, git
+├── utils/                 shell (procesos externos), paths, git, logger
 ├── web/                   Panel: index.html, styles.css, app.js (sin framework)
 └── scripts/
     ├── antigravity_bridge.py   Servidor OpenAI-compatible (Gemini o mock)
     └── interpreter_runner.py   Puente hacia el paquete Python de Open Interpreter
 skills/                    Skills incluidas (econometría, APIs financieras, d3.js)
-tests/                     node:test, 109 casos, sin dependencias externas
+tests/                     node:test, 125 casos, sin dependencias externas
 scripts/probe/             Sondas manuales contra herramientas reales + dobles (fake-llm, fake-openhands)
 docs/ARCHITECTURE.md       Decisiones de diseño y guía para extender
 ```

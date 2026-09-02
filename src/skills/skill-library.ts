@@ -25,6 +25,9 @@ import { MaterializedSkill, SkillInfo, SkillSource } from './types';
 import { readSkillFile, SkillFileError } from './skill-file';
 import { run } from '../utils/shell';
 import { addToGitExclude } from '../utils/git';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('Skills');
 
 /** Directorios que nunca se recorren buscando skills. */
 const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'dist', 'build']);
@@ -163,7 +166,7 @@ export class SkillLibrary {
       const info = this.get(name);
       if (!info) continue;
       if (directorySize(info.dir) > MAX_SKILL_BYTES) {
-        console.warn(`[Skills] "${name}" supera ${MAX_SKILL_BYTES / 1024 / 1024} MB; no se copia`);
+        log.warn(`"${name}" supera ${MAX_SKILL_BYTES / 1024 / 1024} MB; no se copia`);
         continue;
       }
       const dest = join(target, name);
@@ -229,7 +232,7 @@ export function describeSkill(skillFile: string, sourceId: string, root: string)
   try {
     const parsed = readSkillFile(skillFile);
     if (parsed.frontmatter.name !== basename(dir)) {
-      console.warn(`[Skills] ${skillFile}: "name" (${parsed.frontmatter.name}) no coincide con el directorio (${basename(dir)}); se omite`);
+      log.debug(`${skillFile}: "name" (${parsed.frontmatter.name}) no coincide con el directorio (${basename(dir)}); se omite`);
       return undefined;
     }
     return {
@@ -244,8 +247,8 @@ export function describeSkill(skillFile: string, sourceId: string, root: string)
       bodyBytes: Buffer.byteLength(parsed.body, 'utf-8')
     };
   } catch (err) {
-    if (err instanceof SkillFileError) console.warn(`[Skills] ${err.message}; se omite`);
-    else console.warn(`[Skills] no se pudo leer ${skillFile}: ${(err as Error).message}`);
+    if (err instanceof SkillFileError) log.debug(`${err.message}; se omite`);
+    else log.warn(`no se pudo leer ${skillFile}`, err as Error);
     return undefined;
   }
 }

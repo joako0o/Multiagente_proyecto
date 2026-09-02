@@ -25,6 +25,9 @@
 import { spawn } from 'child_process';
 import { AdapterStatus, AgentAdapter, AgentTask } from '../types';
 import { AppConfig } from '../config';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('OpenCode');
 
 type OpenCodeConfig = AppConfig['opencode'];
 
@@ -94,7 +97,7 @@ export class OpenCodeAdapter implements AgentAdapter {
           return '⏹️ **Turno detenido por el usuario.**';
         }
         lastError = (err as Error).message;
-        console.warn(`[OpenCode] intento ${attempt}/${MAX_ATTEMPTS} falló: ${lastError}`);
+        log.warn(`intento ${attempt}/${MAX_ATTEMPTS} falló: ${lastError}`);
 
         if (/HTTP 404/.test(lastError)) {
           // La sesión expiró o el servidor se reinició: forzamos una nueva.
@@ -146,7 +149,7 @@ export class OpenCodeAdapter implements AgentAdapter {
 
     this.autoStartAttempted = true;
     const port = new URL(this.config.url).port || '4096';
-    console.log(`[OpenCode] servidor no detectado; ejecutando "opencode serve --port ${port}"...`);
+    log.info(`servidor no detectado; ejecutando "opencode serve --port ${port}"…`);
 
     try {
       const child = spawn('opencode', ['serve', '--port', port], {
@@ -155,10 +158,10 @@ export class OpenCodeAdapter implements AgentAdapter {
         shell: process.platform === 'win32',
         windowsHide: true
       });
-      child.on('error', (err) => console.warn(`[OpenCode] no se pudo arrancar: ${err.message}`));
+      child.on('error', (err) => log.warn('no se pudo arrancar', err));
       child.unref();
     } catch (err) {
-      console.warn(`[OpenCode] no se pudo arrancar: ${(err as Error).message}`);
+      log.warn('no se pudo arrancar', err as Error);
       return false;
     }
 
@@ -166,7 +169,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     while (Date.now() < deadline) {
       await sleep(500);
       if ((await this.health()).ok) {
-        console.log('[OpenCode] servidor arrancado correctamente');
+        log.info('servidor arrancado correctamente');
         return true;
       }
     }
@@ -191,7 +194,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       }
       this.knownSkills.set(task.projectPath, wanted);
     } catch (err) {
-      console.warn(`[OpenCode] no se pudo refrescar la caché de skills: ${(err as Error).message}`);
+      log.warn('no se pudo refrescar la caché de skills', err as Error);
     }
   }
 

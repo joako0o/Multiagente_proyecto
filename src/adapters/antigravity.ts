@@ -10,6 +10,9 @@
  */
 import { AdapterStatus, AgentAdapter, AgentTask } from '../types';
 import { AppConfig } from '../config';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('Antigravity');
 
 type AntigravityConfig = AppConfig['antigravity'];
 
@@ -77,7 +80,7 @@ export class AntigravityAdapter implements AgentAdapter {
         }
         lastError = (err as Error).message;
         const retryable = /HTTP (429|5\d\d)|timeout|aborted|fetch failed/i.test(lastError);
-        console.warn(`[Antigravity] intento ${attempt}/${MAX_ATTEMPTS} falló: ${lastError}`);
+        log.warn(`intento ${attempt}/${MAX_ATTEMPTS} falló: ${lastError}`);
         if (!retryable) break;
       }
       if (attempt < MAX_ATTEMPTS) {

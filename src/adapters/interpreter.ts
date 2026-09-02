@@ -26,6 +26,9 @@ import { join } from 'path';
 import { AdapterStatus, AgentAdapter, AgentTask } from '../types';
 import { AppConfig } from '../config';
 import { CommandNotFoundError, RunResult, run, truncateMiddle } from '../utils/shell';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('Interpreter');
 
 type InterpreterConfig = AppConfig['interpreter'];
 
@@ -113,7 +116,7 @@ export class InterpreterAdapter implements AgentAdapter {
           return { kind: 'python', python, runner, version: info.version ?? '?' };
         }
       } catch (err) {
-        if (!(err instanceof CommandNotFoundError)) console.warn(`[Interpreter] fallo al comprobar el paquete Python: ${(err as Error).message}`);
+        if (!(err instanceof CommandNotFoundError)) log.warn('fallo al comprobar el paquete Python', err as Error);
       }
     }
 

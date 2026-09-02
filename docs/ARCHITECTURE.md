@@ -194,6 +194,8 @@ Si en vez de una CLI es una API HTTP, implementa `AgentAdapter` directamente (ve
 ```
 tests/
 ├── shell.test.ts                run(): salida en vivo, aborto, árbol de procesos, timeout
+├── base-cli-adapter.test.ts     cabecera, caché de estado, timeout/aborto/exit≠0, avisos ⚠️
+├── paths.test.ts / logger.test.ts
 ├── verdict.test.ts              parseo de veredicto y equipo
 ├── phases.test.ts               regla de fases
 ├── prompt-builder.test.ts       contenido del prompt por rol/modo
@@ -208,6 +210,10 @@ tests/
 ```
 
 Usan `node:test` (sin dependencias) y no tocan red ni herramientas externas. `npm test` corre en ~1 s. `scripts/test-e2e.js` es la prueba real de extremo a extremo y sí requiere credenciales.
+
+## 9b. Logs
+
+`utils/logger.ts` es un logger de 60 líneas sin dependencias: `createLogger('Módulo')` devuelve `debug/info/warn/error`, cada línea lleva hora, nivel y módulo, y `warn`/`error` van a stderr. El nivel se fija con `LOG_LEVEL` (por defecto `info`; `npm test` lo pone en `silent` mediante `tests/helpers/silence-logs.js`, precargado con `--require` para que funcione igual en cmd.exe). Regla: nada de `console.*` en `src/` salvo el banner de arranque y el fallo fatal de `index.ts`.
 
 ## 10. Decisiones que conviene conocer
 

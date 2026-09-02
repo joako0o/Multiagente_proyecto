@@ -14,6 +14,9 @@ import { ClientCommand, ServerEvent } from '../types';
 import { Orchestrator } from '../core/orchestrator';
 import { AgentRegistry } from '../agents/registry';
 import { SkillCoordinator } from '../skills/skill-coordinator';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('WebSocket');
 
 export class ChatWebSocketServer {
   private wss?: WebSocketServer;
@@ -30,7 +33,7 @@ export class ChatWebSocketServer {
     this.wss = new WebSocketServer({ server, path: '/ws' });
 
     this.wss.on('connection', (socket) => {
-      console.log('[WebSocket] cliente conectado');
+      log.debug('cliente conectado');
 
       this.send(socket, {
         type: 'connected',
@@ -52,8 +55,8 @@ export class ChatWebSocketServer {
         this.handle(socket, command);
       });
 
-      socket.on('close', () => console.log('[WebSocket] cliente desconectado'));
-      socket.on('error', (err) => console.warn(`[WebSocket] error de socket: ${err.message}`));
+      socket.on('close', () => log.debug('cliente desconectado'));
+      socket.on('error', (err) => log.warn('error de socket', err));
     });
   }
 

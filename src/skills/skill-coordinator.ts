@@ -17,6 +17,9 @@ import { parseSkillAssignments, renderAssignmentInstructions, renderBriefingForA
 import { selectRelevantSkills } from './skill-search';
 import { MaterializedSkill, SkillAssignments, SkillInfo } from './types';
 import { SkillSummary } from '../types';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('Skills');
 
 /** Interfaz mínima que necesita el coordinador para resolver ids de agentes. */
 export interface AgentLookup {
@@ -172,7 +175,7 @@ export class SkillCoordinator {
       try {
         for (const m of this.library!.materialize(workspace, missing)) done.set(m.name, m);
       } catch (err) {
-        console.warn(`[Skills] no se pudieron copiar skills a ${workspace}: ${(err as Error).message}`);
+        log.warn(`no se pudieron copiar skills a ${workspace}`, err as Error);
       }
     }
     return done;

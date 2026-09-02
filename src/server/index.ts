@@ -17,6 +17,9 @@ import { createHttpRoutes } from './http-routes';
 import { ChatWebSocketServer } from './websocket-server';
 import { SkillLibrary } from '../skills/skill-library';
 import { SkillCoordinator } from '../skills/skill-coordinator';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('Server');
 
 export const APP_VERSION = '3.1.0';
 
@@ -43,7 +46,7 @@ export class BridgeServer {
       defaults: { maxTurns: config.loop.maxTurns, delayBetweenTurnsMs: config.loop.delayBetweenTurnsMs, autoStopOnError: false }
     });
     const restored = this.orchestrator.restore();
-    if (restored) console.log(`[Sesiones] ${restored} sesión(es) recuperadas de ${config.sessionsDir}`);
+    if (restored) log.info(`${restored} sesión(es) recuperadas de ${config.sessionsDir}`);
 
     this.app.use(express.json({ limit: '1mb' }));
     this.app.use('/api', createHttpRoutes({ orchestrator: this.orchestrator, registry, skills, skillLibrary: this.skillLibrary, version: APP_VERSION }));
@@ -74,10 +77,10 @@ export class BridgeServer {
       const results = await this.skillLibrary.sync();
       for (const r of results) {
         const status = r.ok ? r.action : `ERROR: ${r.detail}`;
-        console.log(`[Skills] ${r.sourceId}: ${status}${r.detail && r.ok ? ` (${r.detail})` : ''}`);
+        (r.ok ? log.info : log.warn)(`skills ${r.sourceId}: ${status}${r.detail && r.ok ? ` (${r.detail})` : ''}`);
       }
     }
-    console.log(`[Skills] ${this.skillLibrary.list().length} skills disponibles en ${this.config.skills.cacheDir}`);
+    log.info(`${this.skillLibrary.list().length} skills disponibles en ${this.config.skills.cacheDir}`);
   }
 
   stop(): Promise<void> {

@@ -13,6 +13,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { Conversation, ConversationMessage } from '../types';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('SessionStore');
 
 export class SessionStore {
   constructor(private readonly dir: string) {}
@@ -25,7 +28,7 @@ export class SessionStore {
       writeFileSync(temp, JSON.stringify(conversation, null, 2), 'utf-8');
       renameSync(temp, target);
     } catch (err) {
-      console.error(`[SessionStore] no se pudo guardar la sesión ${conversation.id}: ${(err as Error).message}`);
+      log.error(`no se pudo guardar la sesión ${conversation.id}`, err as Error);
     }
   }
 
@@ -53,7 +56,7 @@ export class SessionStore {
         }
         conversations.push(conversation);
       } catch (err) {
-        console.warn(`[SessionStore] se omite ${file}: ${(err as Error).message}`);
+        log.warn(`se omite ${file}`, err as Error);
       }
     }
 
