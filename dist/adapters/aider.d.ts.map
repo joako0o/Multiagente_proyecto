@@ -1,0 +1,1 @@
+{"version":3,"file":"aider.d.ts","sourceRoot":"","sources":["../../src/adapters/aider.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,YAAY,EAAE,mBAAmB,EAAE,MAAM,UAAU,CAAC;AAO7D,qBAAa,YAAa,YAAW,YAAY;IAC/C,gBAAgB,IAAI,MAAM,CAEzB;IAEK,WAAW,IAAI,OAAO,CAAC,OAAO,CAAC,CAOpC;IAEK,WAAW,CAAC,OAAO,EAAE,mBAAmB,GAAG,OAAO,CAAC,MAAM,CAAC,CA+B/D;CACF"}
