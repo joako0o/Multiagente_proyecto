@@ -33,6 +33,13 @@ describe('loadConfig', () => {
     assert.equal(cfg.aider.autoCommits, true);
   });
 
+  test('las fuentes de skills por defecto son varias y se pueden sustituir', () => {
+    const ids = loadConfig({}).skills.sources.map(s => s.id);
+    assert.ok(ids.includes('anthropics/skills'));
+    assert.ok(ids.includes('bytedance/deer-flow'));
+    assert.deepEqual(loadConfig({ SKILLS_SOURCES: 'acme/one' }).skills.sources.map(s => s.id), ['acme/one']);
+  });
+
   test('normaliza la URL de OpenCode sin barra final', () => {
     assert.equal(loadConfig({ OPENCODE_URL: 'http://localhost:4096/' }).opencode.url, 'http://localhost:4096');
   });

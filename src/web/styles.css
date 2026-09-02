@@ -419,23 +419,56 @@ button { font: inherit; }
 }
 .session-skills .chip b { color: var(--text); font-family: inherit; font-weight: 600; }
 
-.skills-assign { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.7rem; border: 1px solid var(--border); border-radius: 6px; background: rgba(0, 0, 0, 0.2); max-height: 260px; overflow-y: auto; }
-.skills-assign .agent-row { display: grid; grid-template-columns: 130px 1fr; gap: 0.5rem; align-items: start; }
-.skills-assign .agent-row > span { font-size: 0.82rem; padding-top: 0.1rem; }
-.skills-assign .options { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-.skills-assign .options label {
+.skill-search {
+  width: 100%;
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.78rem;
+}
+.skill-search:focus { outline: none; border-color: var(--accent); }
+.skill-item .match { color: #38bdf8; font-size: 0.66rem; margin-left: 0.3rem; }
+
+.skills-assign { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.7rem; border: 1px solid var(--border); border-radius: 6px; background: rgba(0, 0, 0, 0.2); }
+.skills-assign .agent-row { display: grid; grid-template-columns: 140px 1fr; gap: 0.5rem; align-items: start; }
+.skills-assign .agent-row > span { font-size: 0.82rem; padding-top: 0.25rem; }
+.skills-assign .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; min-height: 1.6rem; align-items: center; }
+.skills-assign .chip-skill {
   font-size: 0.72rem;
   font-family: var(--mono);
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(252, 211, 77, 0.6);
+  background: rgba(252, 211, 77, 0.1);
+  color: #fde68a;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
 }
-.skills-assign .options label:has(input:checked) { border-color: rgba(252, 211, 77, 0.6); background: rgba(252, 211, 77, 0.1); color: #fde68a; }
-.skills-assign .options input { margin: 0; }
+.skills-assign .chip-skill:hover { text-decoration: line-through; }
+.skills-assign .chip-skill.add {
+  border-style: dashed;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-muted);
+}
+.skills-assign .chip-skill.add:hover { text-decoration: none; border-color: var(--accent); color: var(--text); }
+.skills-assign .agent-row.active .chip-skill.add { border-color: var(--accent); color: var(--text); }
+.skills-assign .picker { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.3rem; }
+.skills-assign .picker input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+.skills-assign .picker ul { list-style: none; max-height: 160px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.skills-assign .picker li { padding: 0.35rem 0.6rem; font-size: 0.76rem; cursor: pointer; display: flex; gap: 0.5rem; align-items: baseline; }
+.skills-assign .picker li:hover { background: rgba(255, 255, 255, 0.06); }
+.skills-assign .picker li .name { font-family: var(--mono); color: #fcd34d; white-space: nowrap; }
+.skills-assign .picker li .desc { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .skill-detail { width: 720px; }
 .skill-detail .message-content { max-height: 55vh; overflow-y: auto; font-size: 0.85rem; }

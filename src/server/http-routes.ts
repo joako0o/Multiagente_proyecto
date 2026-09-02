@@ -55,12 +55,18 @@ export function createHttpRoutes({ orchestrator, registry, skills, skillLibrary,
     res.json(PHASE_LABELS);
   });
 
-  /** Catálogo de skills disponibles para asignar a los agentes. */
-  router.get('/skills', (_req, res) => {
+  /**
+   * Catálogo de skills disponibles para asignar a los agentes.
+   * Con `?q=texto` devuelve además `ranking`: las más relevantes para ese texto
+   * (mismo criterio que usa el arquitecto en planificación).
+   */
+  router.get('/skills', (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     res.json({
       enabled: skills.enabled,
       sources: skillLibrary?.configuredSources ?? [],
-      skills: skills.summaries()
+      skills: skills.summaries(),
+      ...(q ? { ranking: skills.search(q, 20) } : {})
     });
   });
 

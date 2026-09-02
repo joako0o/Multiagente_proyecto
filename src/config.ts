@@ -187,12 +187,24 @@ export function loadConfig(env: Env = process.env): AppConfig {
     skills: {
       enabled: bool(env, 'SKILLS_ENABLED', true),
       cacheDir: str(env, 'SKILLS_CACHE_DIR', join(process.cwd(), '.skills-cache')),
-      sources: parseSkillSources(str(env, 'SKILLS_SOURCES', 'anthropics/skills')),
+      sources: parseSkillSources(str(env, 'SKILLS_SOURCES', DEFAULT_SKILL_SOURCES)),
       syncOnStart: bool(env, 'SKILLS_SYNC_ON_START', true),
       bundledDirs: str(env, 'SKILLS_BUNDLED_DIRS', join(process.cwd(), 'skills')).split(',').map(s => s.trim()).filter(Boolean)
     }
   };
 }
+
+/**
+ * Repositorios de skills por defecto (todos MIT, verificados con esta versión):
+ *  - anthropics/skills            documentos (docx/pptx/xlsx/pdf), diseño web, pruebas de webapps.
+ *  - bytedance/deer-flow          análisis de datos, investigación profunda, gráficos, presentaciones,
+ *                                 revisión de papers.
+ *  - K-Dense-AI/scientific-agent-skills  ciencia de datos y escritura académica: estadística,
+ *                                 statsmodels, forecasting, literatura, LaTeX, posters (163 skills, ~500 MB).
+ *  - addyosmani/agent-skills      ingeniería: planificación, diseño de APIs, revisión, documentación/ADRs.
+ * Ver README → "Skills" para más repositorios (diseño UX, wshobson/agents, microsoft/skills…).
+ */
+export const DEFAULT_SKILL_SOURCES = 'anthropics/skills,bytedance/deer-flow,K-Dense-AI/scientific-agent-skills,addyosmani/agent-skills';
 
 /**
  * `owner/repo`, `owner/repo@ref` o URL completa (`https://…/repo.git[@ref]`), separados por comas.

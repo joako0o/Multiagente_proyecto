@@ -25,6 +25,12 @@ const state = {
   conversations: [],
   /** Catálogo de skills: [{ name, description, sourceId, license, fileCount }] */
   skills: [],
+  /** Resultado de la última búsqueda en la barra lateral: [{ name, score, matched }] o null (= sin filtro). */
+  skillRanking: null,
+  /** Asignación manual en el formulario de nueva sesión: { agentId: [skill, …] }. */
+  draftSkills: {},
+  /** Agente cuyo selector de skills está abierto en el formulario. */
+  draftPickerAgent: null,
   /** Sesión abierta en el panel. */
   currentId: null,
   currentStatus: 'idle',
@@ -229,6 +235,9 @@ function renderTeamCheckboxes() {
 
 /* --- Skills ------------------------------------------------------------- */
 
+/** Máximo de skills que se pintan en la barra lateral sin filtro (con cientos, se pide buscar). */
+const SIDEBAR_SKILL_LIMIT = 40;
+
 function renderSkills() {
   const list = $('skillList');
   list.innerHTML = '';
@@ -237,19 +246,56 @@ function renderSkills() {
     list.innerHTML = '<li class="muted">Sin skills. Configura SKILLS_SOURCES en .env o añade carpetas en .skills-cache/local/.</li>';
     return;
   }
-  for (const skill of state.skills) {
+
+  const byName = new Map(state.skills.map(s => [s.name, s]));
+  let shown;
+  if (state.skillRanking) {
+    shown = state.skillRanking.map(r => ({ ...byName.get(r.name), matched: r.matched })).filter(s => s.name);
+    if (!shown.length) list.innerHTML = '<li class="muted">Ninguna skill coincide. Prueba con otras palabras (español o inglés).</li>';
+  } else {
+    shown = state.skills.slice(0, SIDEBAR_SKILL_LIMIT);
+  }
+
+  for (const skill of shown) {
     const li = document.createElement('li');
     li.className = 'skill-item';
     li.title = 'Ver instrucciones';
+    const match = skill.matched?.length ? `<span class="match">≈ ${escapeHtml(skill.matched.slice(0, 3).join(', '))}</span>` : '';
     li.innerHTML = `
-      <span class="name">${escapeHtml(skill.name)}</span><span class="source">${escapeHtml(skill.sourceId)}${skill.fileCount ? ` · ${skill.fileCount} archivo(s)` : ''}</span>
+      <span class="name">${escapeHtml(skill.name)}</span><span class="source">${escapeHtml(skill.sourceId)}${skill.fileCount ? ` · ${skill.fileCount} archivo(s)` : ''}</span>${match}
       <p>${escapeHtml(skill.description)}</p>`;
     li.addEventListener('click', () => openSkill(skill.name));
     list.appendChild(li);
   }
+  if (!state.skillRanking && state.skills.length > SIDEBAR_SKILL_LIMIT) {
+    const more = document.createElement('li');
+    more.className = 'muted';
+    more.textContent = `… y ${state.skills.length - SIDEBAR_SKILL_LIMIT} más. Usa el buscador para encontrarlas.`;
+    list.appendChild(more);
+  }
 }
 
-/** Filas "agente → checkboxes de skills" del formulario de nueva sesión. */
+let skillSearchTimer = null;
+function onSkillSearch(query) {
+  clearTimeout(skillSearchTimer);
+  const q = query.trim();
+  if (!q) { state.skillRanking = null; renderSkills(); return; }
+  skillSearchTimer = setTimeout(async () => {
+    try {
+      const data = await fetch(`/api/skills?q=${encodeURIComponent(q)}`).then(r => r.json());
+      state.skillRanking = data.ranking || [];
+      renderSkills();
+    } catch (err) {
+      log(`Búsqueda de skills falló: ${err.message}`, 'err');
+    }
+  }, 250);
+}
+
+/**
+ * Filas "agente → skills elegidas" del formulario de nueva sesión. Cada fila
+ * muestra chips (clic = quitar) y un botón "+ añadir" que abre un buscador
+ * sobre el catálogo (con cientos de skills no caben checkboxes).
+ */
 function renderSkillAssignments() {
   const container = $('skillsAssign');
   container.innerHTML = '';
@@ -259,26 +305,73 @@ function renderSkillAssignments() {
   for (const agent of state.agents) {
     if (agent.id === 'antigravity') continue; // el arquitecto asigna, no ejecuta skills
     const row = document.createElement('div');
-    row.className = 'agent-row';
+    row.className = 'agent-row' + (state.draftPickerAgent === agent.id ? ' active' : '');
     row.dataset.agent = agent.id;
-    row.innerHTML = `<span>${agent.emoji} ${escapeHtml(agent.name)}</span><div class="options"></div>`;
-    const options = row.querySelector('.options');
-    for (const skill of state.skills) {
-      const label = document.createElement('label');
-      label.title = skill.description;
-      label.innerHTML = `<input type="checkbox" value="${escapeHtml(skill.name)}"> ${escapeHtml(skill.name)}`;
-      options.appendChild(label);
-    }
+
+    const chosen = state.draftSkills[agent.id] || [];
+    const chips = chosen.map(name => `<span class="chip-skill" data-remove="${escapeHtml(name)}" title="Quitar">${escapeHtml(name)} ✕</span>`).join('');
+    row.innerHTML = `<span>${agent.emoji} ${escapeHtml(agent.name)}</span>
+      <div class="chips">${chips}<span class="chip-skill add" data-add="1">+ añadir skill</span></div>`;
+
+    row.querySelectorAll('[data-remove]').forEach(chip => chip.addEventListener('click', () => {
+      state.draftSkills[agent.id] = chosen.filter(n => n !== chip.dataset.remove);
+      renderSkillAssignments();
+    }));
+    row.querySelector('[data-add]').addEventListener('click', () => {
+      state.draftPickerAgent = state.draftPickerAgent === agent.id ? null : agent.id;
+      renderSkillAssignments();
+    });
+
+    if (state.draftPickerAgent === agent.id) row.appendChild(buildSkillPicker(agent.id));
     container.appendChild(row);
   }
 }
 
-/** Lee el formulario → { agentId: [skill, ...] } (solo agentes con alguna marcada). */
+/** Buscador embebido: escribe → ranking del servidor → clic añade la skill al agente. */
+function buildSkillPicker(agentId) {
+  const picker = document.createElement('div');
+  picker.className = 'picker';
+  picker.innerHTML = `<input type="search" placeholder="Buscar skill (p. ej. series temporales, pptx, landing)…" autocomplete="off"><ul></ul>`;
+  const input = picker.querySelector('input');
+  const results = picker.querySelector('ul');
+
+  const show = (items) => {
+    results.innerHTML = '';
+    for (const skill of items.slice(0, 12)) {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="name">${escapeHtml(skill.name)}</span><span class="desc">${escapeHtml(skill.description)}</span>`;
+      li.title = skill.description;
+      li.addEventListener('click', () => {
+        const list = state.draftSkills[agentId] || (state.draftSkills[agentId] = []);
+        if (!list.includes(skill.name)) list.push(skill.name);
+        renderSkillAssignments();
+      });
+      results.appendChild(li);
+    }
+    if (!items.length) results.innerHTML = '<li class="muted">Sin coincidencias</li>';
+  };
+
+  show(state.skills.slice(0, 12));
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (!q) return show(state.skills.slice(0, 12));
+    timer = setTimeout(async () => {
+      const data = await fetch(`/api/skills?q=${encodeURIComponent(q)}`).then(r => r.json()).catch(() => ({}));
+      const byName = new Map(state.skills.map(s => [s.name, s]));
+      show((data.ranking || []).map(r => byName.get(r.name)).filter(Boolean));
+    }, 200);
+  });
+  setTimeout(() => input.focus(), 0);
+  return picker;
+}
+
+/** Asignación del formulario → { agentId: [skill, ...] } (solo agentes con alguna). */
 function collectSkillAssignments() {
   const result = {};
-  for (const row of $('skillsAssign').querySelectorAll('.agent-row')) {
-    const names = [...row.querySelectorAll('input:checked')].map(i => i.value);
-    if (names.length) result[row.dataset.agent] = names;
+  for (const [agentId, names] of Object.entries(state.draftSkills)) {
+    if (names.length) result[agentId] = [...names];
   }
   return Object.keys(result).length ? result : undefined;
 }
@@ -599,6 +692,9 @@ function formatBytes(n) {
    ======================================================================== */
 
 function openModal() {
+  state.draftSkills = {};
+  state.draftPickerAgent = null;
+  renderSkillAssignments();
   $('newSessionModal').hidden = false;
   $('sessionTitle').focus();
 }
@@ -677,6 +773,7 @@ $('refreshStatusBtn').addEventListener('click', refreshAgentStatus);
 $('chatTabs').addEventListener('click', (e) => { const btn = e.target.closest('.tab'); if (btn) setTab(btn.dataset.tab); });
 $('refreshFilesBtn').addEventListener('click', loadFiles);
 $('syncSkillsBtn').addEventListener('click', syncSkills);
+$('skillSearch').addEventListener('input', (e) => onSkillSearch(e.target.value));
 $('closeSkillBtn').addEventListener('click', () => { $('skillModal').hidden = true; });
 $('skillModal').addEventListener('click', (e) => { if (e.target.id === 'skillModal') $('skillModal').hidden = true; });
 $('newSessionModal').addEventListener('click', (e) => { if (e.target.id === 'newSessionModal') closeModal(); });

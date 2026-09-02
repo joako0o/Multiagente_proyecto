@@ -137,7 +137,8 @@ Piezas:
 | `skill-file.ts` | Parsear y validar un `SKILL.md` (reglas de `name`, recorte de `description` > 1024). | Pura salvo `readSkillFile`. |
 | `skill-library.ts` | `sync()` (git clone/pull por fuente), `list()` (catálogo con prioridad local → bundled → remotas), `materialize()` (copia a `<ws>/.agents/skills/<name>` + `README.md` + `.git/info/exclude`). | Disco y `git`. |
 | `skill-briefing.ts` | Texto para el arquitecto (catálogo + formato `[SKILLS: agente=a,b; …]`), `parseSkillAssignments`, y el dossier por agente (`renderBriefingForAgent`). | Pura. |
-| `skill-coordinator.ts` | Lo que llama el orquestador: sección de planificación, aplicar la etiqueta del arquitecto, preparar el turno (materializar + dossier). Con biblioteca ausente es neutro. | Orquesta las anteriores. |
+| `skill-search.ts` | Ranking léxico de skills frente a un objetivo: TF‑IDF sobre nombre+descripción, sinónimos es↔en del dominio, coincidencia débil por raíz para cognados (`literatura`~`literature`), bonificación a `local`/`bundled`. | Pura. |
+| `skill-coordinator.ts` | Lo que llama el orquestador: sección de planificación (catálogo completo si ≤30 skills, si no las 25 más relevantes + las fijadas por el usuario), aplicar la etiqueta del arquitecto, preparar el turno (materializar + dossier). Con biblioteca ausente es neutro. | Orquesta las anteriores. |
 
 Decisiones:
 
@@ -145,6 +146,8 @@ Decisiones:
 - **OpenCode cachea el escaneo de skills por directorio.** Verificado en 1.18.26: las skills copiadas después de que el servidor conozca el workspace no aparecen hasta `POST /instance/dispose` (las sesiones siguen vivas). El adaptador lo hace cuando cambia el conjunto de skills del workspace.
 - **El usuario manda.** Las asignaciones del formulario se conservan; el arquitecto solo puede añadir (máximo 3 por agente, solo nombres del catálogo, solo agentes del equipo).
 - **Descripción como contrato.** El arquitecto decide solo con `name` + `description` (progressive disclosure del estándar); una skill con descripción vaga no se asignará bien. Las incluidas en `skills/` siguen la regla "qué hace y cuándo usarla".
+- **Preselección sin LLM.** Con 4 repositorios hay ~400 skills (≈100 000 caracteres de catálogo): demasiado para un turno. El ranking léxico descarta el 90 % irrelevante en ~30 ms y sin red; la precisión final la pone el arquitecto sobre las ~25 restantes. La etiqueta `[SKILLS: …]` acepta cualquier nombre de la biblioteca, no solo los mostrados, por si el arquitecto conoce uno.
+- **Frontmatter tolerante.** Muchas skills de GitHub tienen YAML no estricto (`description: Guides through: 1) …`). Si el parser YAML falla, un lector `clave: resto de línea` recupera `name`/`description` en vez de descartar la skill.
 - **Licencias visibles, no filtradas.** El catálogo muestra `license`; no se bloquea ninguna porque el uso legítimo depende del contexto del usuario.
 
 ## 7. Panel web
@@ -193,6 +196,7 @@ tests/
 ├── interpreter.test.ts          lista blanca de comandos del fallback y parseo del runner
 ├── openhands-parser.test.ts     parseo JSONL
 ├── skills.test.ts               SKILL.md, biblioteca en disco, asignación y dossiers
+├── skill-search.test.ts         ranking es/en, sinónimos, cognados, pinned
 ├── session-store.test.ts        guardar/recuperar, reinicio simulado y reanudación
 ├── workspace-files.test.ts      listado, confinamiento de rutas (.., symlinks), MIME
 └── orchestrator.test.ts         ciclo completo con adaptadores falsos, [SIGUIENTE]

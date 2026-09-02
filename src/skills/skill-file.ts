@@ -47,7 +47,11 @@ export function parseSkillFile(content: string, path?: string): ParsedSkillFile 
   try {
     data = parseYaml(match[1]);
   } catch (err) {
-    throw new SkillFileError(`frontmatter YAML inválido: ${(err as Error).message}`, path);
+    // Muchas skills escritas a mano tienen descripciones con `:` sin comillas
+    // ("Guides through: 1) …"), que YAML estricto rechaza. Antes de rendirnos,
+    // leemos los campos de primer nivel como `clave: resto de la línea`.
+    data = parseLooseFrontmatter(match[1]);
+    if (!data) throw new SkillFileError(`frontmatter YAML inválido: ${(err as Error).message}`, path);
   }
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new SkillFileError('el frontmatter debe ser un mapa YAML', path);
@@ -76,6 +80,30 @@ export function parseSkillFile(content: string, path?: string): ParsedSkillFile 
   }
 
   return { frontmatter, body: match[2].trim() };
+}
+
+/**
+ * Lector tolerante para frontmatter no estrictamente YAML: cada línea de primer
+ * nivel `clave: valor` se toma literal (con continuaciones indentadas para
+ * bloques `|`/`>` o texto multilínea). Solo se usa cuando el parser YAML falla.
+ */
+export function parseLooseFrontmatter(block: string): Record<string, unknown> | undefined {
+  const result: Record<string, string> = {};
+  let currentKey: string | undefined;
+  for (const line of block.split('\n')) {
+    const top = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+    if (top) {
+      currentKey = top[1];
+      result[currentKey] = top[2].replace(/^[|>][-+]?\s*$/, '').trim();
+    } else if (currentKey && /^\s+\S/.test(line)) {
+      result[currentKey] = `${result[currentKey]} ${line.trim()}`.trim();
+    }
+  }
+  if (!result.name || !result.description) return undefined;
+  for (const key of ['name', 'description', 'license', 'compatibility']) {
+    if (result[key]) result[key] = result[key].replace(/^["']|["']$/g, '');
+  }
+  return result;
 }
 
 export function readSkillFile(path: string): ParsedSkillFile {

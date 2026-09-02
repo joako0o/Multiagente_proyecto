@@ -14,6 +14,7 @@
 import { Agent, Conversation } from '../types';
 import { SkillLibrary } from './skill-library';
 import { parseSkillAssignments, renderAssignmentInstructions, renderBriefingForAgent, renderCatalogForArchitect } from './skill-briefing';
+import { selectRelevantSkills } from './skill-search';
 import { MaterializedSkill, SkillAssignments, SkillInfo } from './types';
 import { SkillSummary } from '../types';
 
@@ -22,6 +23,11 @@ export interface AgentLookup {
   has(id: string): boolean;
   get(id: string): Agent | undefined;
 }
+
+/** Cuántas skills ve el arquitecto como máximo en el turno de planificación. */
+const CATALOG_LIMIT = 25;
+/** Con este número o menos, no se filtra: se muestra la biblioteca entera. */
+const CATALOG_SHOW_ALL_THRESHOLD = 30;
 
 export class SkillCoordinator {
   /** Skills ya copiadas por workspace, para no repetir la copia en cada turno. */
@@ -55,17 +61,43 @@ export class SkillCoordinator {
   // Turno del arquitecto
   // ---------------------------------------------------------------------------
 
-  /** Sección para el prompt de planificación: instrucciones de asignación + catálogo. */
+  /**
+   * Sección para el prompt de planificación: instrucciones de asignación + catálogo.
+   *
+   * Con bibliotecas grandes solo se muestran las skills relevantes para el
+   * objetivo (ranking léxico local, ver `skill-search.ts`), más las que el
+   * usuario ya asignó a mano. Así el arquitecto elige entre ~25 candidatas en
+   * vez de leer cientos de descripciones.
+   */
   sectionForArchitect(conversation: Conversation): string {
     if (!this.enabled) return '';
     const teamWithoutArchitect = conversation.agents.filter(id => id !== 'antigravity');
+    const all = this.library!.list();
+    const goal = conversation.messages.find(m => m.role === 'user')?.content ?? conversation.title;
+    const pinned = Object.values(conversation.skills).flat();
+
+    let shown = all;
+    let note = '';
+    if (all.length > CATALOG_SHOW_ALL_THRESHOLD) {
+      shown = selectRelevantSkills(all, goal, { limit: CATALOG_LIMIT, pinned }).map(r => r.skill);
+      note = `_Se muestran las ${shown.length} skills más relevantes para el objetivo, de ${all.length} disponibles. ` +
+        `Si necesitas otra, indícalo en tu plan (el usuario puede asignarla) o pide al equipo que consulte \`.agents/skills/README.md\`._`;
+    }
+
     return [
       `## Biblioteca de skills`,
       ``,
       renderAssignmentInstructions(teamWithoutArchitect),
       ``,
-      renderCatalogForArchitect(this.library!.list())
+      ...(note ? [note, ``] : []),
+      renderCatalogForArchitect(shown)
     ].join('\n');
+  }
+
+  /** Búsqueda para la API/panel: skills relevantes para un texto libre. */
+  search(query: string, limit = 20): Array<{ name: string; score: number; matched: string[] }> {
+    if (!this.library) return [];
+    return selectRelevantSkills(this.library.list(), query, { limit }).map(r => ({ name: r.skill.name, score: r.score, matched: r.matched }));
   }
 
   /**

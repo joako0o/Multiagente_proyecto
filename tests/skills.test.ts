@@ -80,6 +80,22 @@ describe('parseSkillFile', () => {
     assert.throws(() => parseSkillFile('# sin frontmatter'), SkillFileError);
   });
 
+  test('tolera frontmatter no estricto (dos puntos sin comillas, bloque | multilínea)', () => {
+    const loose = '---\nname: smoke-test\ndescription: End-to-end smoke test. Guides through: 1) Pull, 2) Run\nlicense: MIT\n---\n# Smoke\n';
+    const parsed = parseSkillFile(loose);
+    assert.equal(parsed.frontmatter.name, 'smoke-test');
+    assert.match(parsed.frontmatter.description, /Guides through: 1\) Pull, 2\) Run$/);
+    assert.equal(parsed.frontmatter.license, 'MIT');
+
+    // Un bloque `|` es YAML válido: lo resuelve el parser estricto conservando los saltos de línea.
+    const block = '---\nname: multi\ndescription: |\n  Primera línea: con dos puntos\n  segunda línea\n---\ncuerpo';
+    assert.equal(parseSkillFile(block).frontmatter.description, 'Primera línea: con dos puntos\nsegunda línea');
+
+    // Continuación indentada SIN `|` no es YAML válido; el lector tolerante la une con espacios.
+    const loose2 = '---\nname: multi\ndescription: Empieza: aquí\n  y sigue indentado\n---\ncuerpo';
+    assert.equal(parseSkillFile(loose2).frontmatter.description, 'Empieza: aquí y sigue indentado');
+  });
+
   test('recorta descripciones que superan los 1024 caracteres en vez de descartar la skill', () => {
     const parsed = parseSkillFile(SKILL('larga', 'x'.repeat(1500)));
     assert.equal(parsed.frontmatter.description.length, 1022);
@@ -184,6 +200,31 @@ describe('SkillCoordinator', () => {
     assert.equal(c.sectionForArchitect(conv), '');
     assert.equal(c.prepareTurn(conv, agents.get('opencode')!), '');
     assert.deepEqual(c.sanitizeAssignments({ opencode: ['pdf'] }, agents), {});
+  });
+
+  test('con una biblioteca grande el arquitecto solo ve las skills relevantes (+ las del usuario)', () => {
+    const { cacheDir } = makeCache();
+    const big = join(cacheDir, 'big__repo');
+    mkdirSync(join(big, '.git'), { recursive: true });
+    for (let i = 0; i < 40; i++) {
+      mkdirSync(join(big, 'skills', `ruido-${i}`), { recursive: true });
+      writeFileSync(join(big, 'skills', `ruido-${i}`, 'SKILL.md'), SKILL(`ruido-${i}`, `Kubernetes helm chart operations number ${i}.`));
+    }
+    mkdirSync(join(big, 'skills', 'slide-deck'), { recursive: true });
+    writeFileSync(join(big, 'skills', 'slide-deck', 'SKILL.md'), SKILL('slide-deck', 'Build presentations and slide decks.'));
+    const lib = new SkillLibrary(cacheDir, [{ id: 'acme/skills', url: 'x' }, { id: 'big/repo', url: 'y' }]);
+    assert.ok(lib.list().length > 30);
+
+    const c = new SkillCoordinator(lib);
+    const conv = conversation({
+      skills: { opencode: ['xlsx'] },
+      messages: [{ id: 'm', conversationId: 'c1', agentId: 'user', role: 'user', content: 'Prepara una presentación para el comité', timestamp: new Date() }]
+    });
+    const section = c.sectionForArchitect(conv);
+    assert.match(section, /Se muestran las \d+ skills más relevantes/);
+    assert.match(section, /`slide-deck`/);
+    assert.match(section, /`xlsx`/);            // pinned por el usuario aunque no coincida
+    assert.doesNotMatch(section, /`ruido-7`/);  // el ruido no aparece
   });
 
   test('el arquitecto ve el catálogo con el formato de asignación', () => {

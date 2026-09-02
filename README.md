@@ -84,10 +84,29 @@ Una **skill** es una carpeta con un `SKILL.md` (instrucciones + descripción de 
   carpeta (soporte nativo)      skills, aquí están sus instrucciones y archivos"
 ```
 
-- **Tú también puedes asignarlas** en el formulario de nueva sesión (por agente). En modo autónomo el arquitecto puede ampliar tu asignación, nunca quitarla.
+- **Tú también puedes asignarlas** en el formulario de nueva sesión (buscador por agente). El arquitecto puede ampliar tu asignación, nunca quitarla.
+- **Con bibliotecas grandes** (cientos de skills) el arquitecto no ve el catálogo entero: un ranking léxico local (español↔inglés, sin LLM) le muestra las ~25 más relevantes para el objetivo, más las que tú fijaste. El mismo ranking alimenta el buscador del panel y `GET /api/skills?q=`.
 - **Incluidas de serie** en [`skills/`](skills/): `econometria-series-temporales`, `api-financiera-cliente`, `visualizacion-d3`. Añade las tuyas creando otra carpeta ahí (o en `.skills-cache/local/` si no quieres versionarlas).
-- **Licencias**: cada skill declara la suya en el frontmatter (el panel la muestra). Las de `anthropics/skills` mezclan Apache-2.0 y propietarias; revísalas antes de usarlas en algo que distribuyas.
+- **Licencias**: cada skill declara la suya en el frontmatter (el panel la muestra). Los repositorios por defecto son MIT, pero dentro de `anthropics/skills` y `scientific-agent-skills` hay algunas propietarias (`xlsx`, `pdf`, `docx`, `pptx` de Anthropic); revísalas antes de usarlas en algo que distribuyas.
 - La carpeta `.agents/skills/` del workspace se añade a `.git/info/exclude` del proyecto, así que no aparece en tu `git status`.
+
+### Qué hay disponible por área
+
+Repositorios públicos con `SKILL.md` que puedes poner en `SKILLS_SOURCES` (estrellas y licencia a fecha de esta versión):
+
+| Área | Repositorio | Qué aporta |
+|---|---|---|
+| **Documentos y presentaciones** | `anthropics/skills` · `bytedance/deer-flow` | Word/Excel/PowerPoint/PDF nativos, `ppt-generation`, `doc-coauthoring`, pósters y slides científicos (`scientific-agent-skills`) |
+| **Datos y análisis** | `bytedance/deer-flow` · `K-Dense-AI/scientific-agent-skills` | `data-analysis` (CSV/Excel → estadísticas, pivots, SQL), `chart-visualization`, `statistical-analysis`, `statsmodels`, `exploratory-data-analysis`, `timesfm-forecasting`, `matplotlib`, `geopandas` |
+| **Investigación** | `bytedance/deer-flow` · `K-Dense-AI/scientific-agent-skills` | `deep-research`, `systematic-literature-review`, `academic-paper-review`, `paper-lookup`, `citation-management`, `scientific-writing`, `peer-review`, `market-research-reports` |
+| **Páginas web** | `anthropics/skills` · `vercel-labs/agent-skills` · `bytedance/deer-flow` | `frontend-design`, `web-artifacts-builder`, `webapp-testing`, React/Next.js, `web-design-guidelines` |
+| **Diseño UI/UX** | `bergside/awesome-design-skills` (67 estilos) · `wshobson/agents` (`ui-design`, `accessibility-compliance`) | Sistemas de estilo (editorial, corporate, brutalism…), `theme-factory`, `brand-guidelines`, auditoría WCAG |
+| **Gestión de proyectos / producto** | `addyosmani/agent-skills` · `obra/superpowers` | `planning-and-task-breakdown`, `spec-driven-development`, `idea-refine`, `writing-plans`, `brainstorming`, `documentation-and-adrs` |
+| **Ingeniería** | `addyosmani/agent-skills` · `obra/superpowers` · `wshobson/agents` (183) | TDD, depuración sistemática, revisión de código, APIs, CI/CD, bases de datos, despliegue |
+| **ML / IA** | `huggingface/skills` · `wshobson/agents` | Modelos, datasets, entrenamiento, Gradio, fine‑tuning |
+| **Catálogos grandes** | `github/awesome-copilot` (400+) · `microsoft/skills` (198, Azure) · `nexu-io/open-design` (500+, plantillas de diseño) | Muy heterogéneos; útiles para buscar algo concreto, pesados para cargar enteros |
+
+Los cuatro primeros (`anthropics/skills`, `bytedance/deer-flow`, `K-Dense-AI/scientific-agent-skills`, `addyosmani/agent-skills`) vienen configurados por defecto: cubren documentos, datos, investigación e ingeniería, que es el trabajo habitual de este proyecto. `scientific-agent-skills` ocupa ~500 MB por sus scripts; si te sobra, quítalo de `SKILLS_SOURCES`.
 
 ## Cómo funciona un ciclo
 
@@ -117,7 +136,7 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las imp
 | `INTERPRETER_PYTHON` | `python3` | Python donde está instalado `open-interpreter` (p. ej. un venv) |
 | `AIDER_AUTO_COMMITS` | `false` | Si Aider hace commit automático |
 | `LOOP_MAX_TURNS` / `LOOP_DELAY_MS` | `15` / `3000` | Ciclo por defecto |
-| `SKILLS_SOURCES` | `anthropics/skills` | Repositorios de skills (`owner/repo[@ref]` o URL, separados por comas) |
+| `SKILLS_SOURCES` | 4 repos (docs, datos, ciencia, ingeniería) | Repositorios de skills (`owner/repo[@ref]` o URL, separados por comas) |
 | `SKILLS_CACHE_DIR` / `SKILLS_SYNC_ON_START` | `./.skills-cache` / `true` | Dónde se clonan y si se actualizan al arrancar |
 | `HISTORY_DIR` / `SESSIONS_DIR` | `./conversations` / `./conversations/.sessions` | Historial `.md` y estado `.json` de las sesiones |
 
@@ -169,6 +188,7 @@ src/
 │   ├── skill-file.ts      Parseo/validación de SKILL.md (estándar Agent Skills)
 │   ├── skill-library.ts   Clona repos, indexa el catálogo, materializa en el workspace
 │   ├── skill-briefing.ts  Catálogo para el arquitecto, parseo de [SKILLS], dossier por agente
+│   ├── skill-search.ts    Ranking léxico es/en para preseleccionar skills relevantes
 │   └── skill-coordinator.ts  Enlace con el orquestador (qué ve cada agente en su turno)
 ├── server/
 │   ├── index.ts           Express + composición de dependencias
@@ -180,7 +200,7 @@ src/
     ├── antigravity_bridge.py   Servidor OpenAI-compatible (Gemini o mock)
     └── interpreter_runner.py   Puente hacia el paquete Python de Open Interpreter
 skills/                    Skills incluidas (econometría, APIs financieras, d3.js)
-tests/                     node:test, 85 casos, sin dependencias externas
+tests/                     node:test, 97 casos, sin dependencias externas
 scripts/probe/             Sondas manuales contra herramientas reales + dobles (fake-llm, fake-openhands)
 docs/ARCHITECTURE.md       Decisiones de diseño y guía para extender
 ```
