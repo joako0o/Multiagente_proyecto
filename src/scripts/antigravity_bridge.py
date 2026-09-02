@@ -1,178 +1,161 @@
 #!/usr/bin/env python3
 """
-Antigravity Bridge - Exposes Antigravity as an OpenAI-compatible API server.
-This script starts a local HTTP server that translates OpenAI API requests
-to Antigravity SDK calls or provides intelligent responses in mock mode.
+Antigravity Bridge — servidor HTTP compatible con la API de OpenAI.
+
+Sirve para dos cosas:
+  1. Exponer Gemini detrás de `/v1/chat/completions`, de modo que cualquier
+     herramienta que solo hable "OpenAI" (Aider, Open Interpreter, el propio
+     bridge con ANTIGRAVITY_PROVIDER=openai) pueda usarlo.
+  2. Modo MOCK sin API key: devuelve respuestas de arquitecto plausibles para
+     probar la tubería completa sin gastar cuota.
+
+Uso:
+    GEMINI_API_KEY=... python src/scripts/antigravity_bridge.py
+    # o sin clave para el modo mock
+    python src/scripts/antigravity_bridge.py
+
+Variables:
+    BRIDGE_PORT     puerto de escucha (por defecto 11435)
+    GEMINI_API_KEY  si está definida, se reenvían las peticiones a Gemini
+    GEMINI_MODEL    modelo de Gemini (por defecto gemini-2.5-flash)
+
+Sin dependencias externas: solo biblioteca estándar.
 """
 
-import asyncio
 import json
 import os
-import sys
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
-APP_DIR = os.environ.get('ANTIGRAVITY_APP_DIR', '')
-if APP_DIR:
-    sys.path.insert(0, APP_DIR)
-
-PORT = int(os.environ.get('BRIDGE_PORT', '11435'))
-
-try:
-    from google.antigravity import Agent, LocalAgentConfig
-    HAS_SDK = True
-except ImportError:
-    HAS_SDK = False
+PORT = int(os.environ.get("BRIDGE_PORT", "11435"))
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
-class AntigravityHandler(BaseHTTPRequestHandler):
-    """HTTP handler that proxies requests to Antigravity."""
+# ---------------------------------------------------------------------------
+# Backends
+# ---------------------------------------------------------------------------
 
-    def log_message(self, format, *args):
-        print(f"[Bridge] {args[0]}")
+def call_gemini(messages: list) -> str:
+    """Traduce mensajes estilo OpenAI a una petición de Gemini y devuelve el texto."""
+    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    contents = [
+        {"role": "model" if m.get("role") == "assistant" else "user", "parts": [{"text": m.get("content", "")}]}
+        for m in messages
+        if m.get("role") in ("user", "assistant")
+    ]
+    body = {"contents": contents, "generationConfig": {"temperature": 0.3, "maxOutputTokens": 6000}}
+    if system_parts:
+        body["system_instruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
 
-    def _send_json(self, status: int, data: dict):
+    request = urllib.request.Request(
+        GEMINI_URL.format(model=GEMINI_MODEL),
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        data = json.loads(response.read().decode("utf-8"))
+
+    parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+    return "\n".join(p.get("text", "") for p in parts if p.get("text") and not p.get("thought")).strip()
+
+
+def mock_reply(messages: list) -> str:
+    """Respuesta simulada de arquitecto. Distingue planificación de revisión por el contenido."""
+    last = (messages[-1].get("content", "") if messages else "").lower()
+
+    if "turno de **revisión**" in last or "veredicto" in last:
+        return (
+            "### Revisión\n\n"
+            "He revisado lo entregado por el equipo. La estructura es coherente con el plan y "
+            "las verificaciones reportadas no muestran errores.\n\n"
+            "VEREDICTO: APROBADO"
+        )
+
+    return (
+        "[EQUIPO: opencode, interpreter]\n\n"
+        "### Plan de trabajo\n\n"
+        "1. **Arquitectura:** módulo único con una función pública y un test que la ejercite.\n"
+        "2. **OpenCode:** implementar el módulo y el test; documentar cómo ejecutarlo.\n"
+        "3. **Open Interpreter:** ejecutar el test y reportar la salida real.\n\n"
+        "Criterio de aceptación: el test pasa y el comando de ejecución está documentado.\n\n"
+        "```bash\nnpm test\n```"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Servidor HTTP
+# ---------------------------------------------------------------------------
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):  # noqa: N802 — firma de la clase base
+        print(f"[bridge] {fmt % args}")
+
+    def _json(self, status: int, payload: dict) -> None:
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+        self.wfile.write(raw)
 
-    def do_OPTIONS(self):
-        self._send_json(200, {"status": "ok"})
+    def do_OPTIONS(self):  # noqa: N802
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.end_headers()
 
-    def do_GET(self):
-        parsed = urlparse(self.path)
-
-        if parsed.path in ('/health', '/api/health'):
-            self._send_json(200, {
-                "status": "ok",
-                "sdk_available": HAS_SDK,
-                "bridge": "Antigravity Bridge v2.0"
-            })
-        elif parsed.path == '/v1/models':
-            models = {
-                "object": "list",
-                "data": [
-                    {"id": "antigravity-claude-sonnet-4-6", "object": "model"},
-                    {"id": "antigravity-claude-opus-4-6-thinking", "object": "model"},
-                    {"id": "antigravity-gemini-3-flash", "object": "model"}
-                ]
-            }
-            self._send_json(200, models)
+    def do_GET(self):  # noqa: N802
+        path = urlparse(self.path).path
+        if path in ("/health", "/v1/health"):
+            self._json(200, {"status": "ok", "mode": "gemini" if GEMINI_API_KEY else "mock", "model": GEMINI_MODEL})
+        elif path == "/v1/models":
+            self._json(200, {"object": "list", "data": [{"id": GEMINI_MODEL, "object": "model", "owned_by": "bridge"}]})
         else:
-            self._send_json(404, {"error": "Not found"})
+            self._json(404, {"error": {"message": "ruta no encontrada"}})
 
-    def do_POST(self):
-        parsed = urlparse(self.path)
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+    def do_POST(self):  # noqa: N802
+        path = urlparse(self.path).path
+        if path != "/v1/chat/completions":
+            self._json(404, {"error": {"message": "ruta no encontrada"}})
+            return
 
-        if parsed.path in ('/v1/chat/completions', '/chat'):
-            try:
-                request = json.loads(body.decode('utf-8'))
-                messages = request.get('messages', [])
-                model = request.get('model', 'antigravity-claude-sonnet-4-6')
-
-                if not messages:
-                    prompt = request.get('prompt', '')
-                else:
-                    # Combine context if provided
-                    prompt = messages[-1].get('content', '')
-
-                response_text = asyncio.run(self._call_antigravity(prompt))
-
-                response = {
-                    "id": "chatcmpl-bridge",
-                    "object": "chat.completion",
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": response_text
-                            },
-                            "finish_reason": "stop"
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": len(prompt.split()),
-                        "completion_tokens": len(response_text.split()),
-                        "total_tokens": len(prompt.split()) + len(response_text.split())
-                    }
-                }
-                self._send_json(200, response)
-
-            except Exception as e:
-                self._send_json(500, {
-                    "error": {
-                        "message": str(e),
-                        "type": "server_error"
-                    }
-                })
-        else:
-            self._send_json(404, {"error": "Endpoint not found"})
-
-    async def _call_antigravity(self, prompt: str) -> str:
-        if not HAS_SDK:
-            # Provide structured architect feedback when in mock/standalone mode
-            return self._generate_mock_feedback(prompt)
-
+        length = int(self.headers.get("Content-Length") or 0)
         try:
-            config = LocalAgentConfig()
-            async with Agent(config) as agent:
-                response = await agent.chat(prompt)
-                return await response.text()
-        except Exception as e:
-            return f"[Antigravity Error: {str(e)}]"
+            body = json.loads(self.rfile.read(length) or b"{}")
+            messages = body.get("messages") or []
+            text = call_gemini(messages) if GEMINI_API_KEY else mock_reply(messages)
+        except urllib.error.HTTPError as err:
+            self._json(err.code, {"error": {"message": f"Gemini HTTP {err.code}: {err.read()[:200].decode('utf-8', 'ignore')}"}})
+            return
+        except Exception as err:  # noqa: BLE001 — cualquier fallo se reporta al cliente
+            self._json(500, {"error": {"message": str(err)}})
+            return
 
-    def _generate_mock_feedback(self, prompt: str) -> str:
-        """Simulates architectural analysis and structured feedback when SDK is offline."""
-        prompt_lower = prompt.lower()
-        if "plan" in prompt_lower or "inicio" in prompt_lower or "fase" in prompt_lower or "requerimiento" in prompt_lower:
-            return (
-                "### 📋 Plan de Arquitectura y Especificación Técnica\n\n"
-                "**1. Diagnóstico del Objetivo:**\n"
-                "Analizando los requerimientos presentados para este proyecto.\n\n"
-                "**2. Tareas para OpenCode (Desarrollador):**\n"
-                "- [ ] Estructurar los módulos requeridos y definir interfaces claras.\n"
-                "- [ ] Implementar la lógica central asegurando manejo de excepciones.\n"
-                "- [ ] Crear pruebas unitarias o de integración para validar casos de borde.\n\n"
-                "**3. Directiva de Ejecución:**\n"
-                "Por favor procede con la implementación de la primera fase y reporta los resultados y diffs correspondientes."
-            )
-        elif "código" in prompt_lower or "implementad" in prompt_lower or "diff" in prompt_lower or "test" in prompt_lower:
-            return (
-                "### 🔍 Revisión de Código y Validación\n\n"
-                "**Evaluación:**\n"
-                "He revisado la implementación entregada. La estructura modular y la cobertura de pruebas son consistentes con las especificaciones.\n\n"
-                "**Recomendaciones de Optimización:**\n"
-                "- Verificar que los tipos TypeScript/Python mantengan estrictez en las firmas públicas.\n"
-                "- Asegurar que los endpoints o módulos manejen timeouts de red de forma resiliente.\n\n"
-                "**Veredicto:** APROBADO ✅. Proceder con la consolidación y verificación final."
-            )
-        else:
-            return (
-                f"### 🤖 Feedback Antigravity\n\n"
-                f"Mensaje procesado con éxito. Continuemos con la iteración colaborativa para asegurar la calidad de la solución."
-            )
+        self._json(200, {
+            "id": "chatcmpl-bridge",
+            "object": "chat.completion",
+            "model": body.get("model") or GEMINI_MODEL,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        })
 
 
-def main():
-    server = HTTPServer(('127.0.0.1', PORT), AntigravityHandler)
-    print(f"[Bridge] Antigravity Bridge running on http://127.0.0.1:{PORT}")
-    print(f"[Bridge] SDK available: {HAS_SDK}")
-    print(f"[Bridge] Press Ctrl+C to stop")
-
+def main() -> None:
+    server = HTTPServer(("127.0.0.1", PORT), Handler)
+    mode = f"gemini ({GEMINI_MODEL})" if GEMINI_API_KEY else "mock (sin GEMINI_API_KEY)"
+    print(f"[bridge] escuchando en http://127.0.0.1:{PORT}/v1 · modo: {mode}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[Bridge] Shutting down...")
-        server.shutdown()
+        print("\n[bridge] detenido")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

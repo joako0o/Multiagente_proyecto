@@ -1,186 +1,104 @@
+/**
+ * Servidor de la aplicación: Express (estáticos + API REST) + WebSocket.
+ *
+ * Composición de dependencias:
+ *   AppConfig → AgentRegistry → Orchestrator → { HTTP routes, WebSocket }
+ */
 import express from 'express';
-import { createServer } from 'http';
-import { join } from 'path';
+import { createServer, Server as HttpServer } from 'http';
 import { existsSync } from 'fs';
-import { ConversationManager } from '../core/conversation-manager';
+import { join } from 'path';
+import { AppConfig } from '../config';
+import { createAgentRegistry } from '../agents/registry';
+import { Orchestrator } from '../core/orchestrator';
+import { HistoryWriter } from '../core/history-writer';
+import { createHttpRoutes } from './http-routes';
 import { ChatWebSocketServer } from './websocket-server';
-import { OpenCodeAdapter } from '../adapters/opencode';
-import { AntigravityAdapter } from '../adapters/antigravity';
-import { InterpreterAdapter } from '../adapters/interpreter';
-import { AiderAdapter } from '../adapters/aider';
-import { Agent, ServerConfig } from '../types';
 
-export class AntigravityOpenCodeServer {
-  private app: express.Application;
-  private server: any;
-  private manager: ConversationManager;
-  private wsServer: ChatWebSocketServer;
-  private config: ServerConfig;
-  private webDir: string;
+export const APP_VERSION = '3.0.0';
 
-  constructor(config: ServerConfig) {
-    this.config = config;
-    this.app = express();
-    this.server = createServer(this.app);
-    this.manager = new ConversationManager();
-    this.wsServer = new ChatWebSocketServer(this.manager);
+export class BridgeServer {
+  private readonly app = express();
+  private readonly httpServer: HttpServer;
+  private readonly wsServer: ChatWebSocketServer;
+  readonly orchestrator: Orchestrator;
 
-    // Resolve static web directory for both src/ and dist/
-    const possibleWebDirs = [
-      join(__dirname, '..', 'web'),
-      join(__dirname, '..', '..', 'src', 'web'),
-      join(process.cwd(), 'src', 'web'),
-      join(process.cwd(), 'dist', 'web')
-    ];
-    this.webDir = possibleWebDirs.find(d => existsSync(d)) || possibleWebDirs[0];
+  constructor(private readonly config: AppConfig) {
+    const registry = createAgentRegistry(config);
+    this.orchestrator = new Orchestrator(
+      registry,
+      new HistoryWriter(config.historyDir),
+      { maxTurns: config.loop.maxTurns, delayBetweenTurnsMs: config.loop.delayBetweenTurnsMs, autoStopOnError: false }
+    );
 
-    this.setupMiddleware();
-    this.setupRoutes();
-    this.registerDefaultAgents();
+    this.app.use(express.json({ limit: '1mb' }));
+    this.app.use('/api', createHttpRoutes(this.orchestrator, registry, APP_VERSION));
+    this.app.use('/vendor', createVendorRoutes());
+    this.app.use(express.static(resolveWebDir()));
+
+    this.httpServer = createServer(this.app);
+    this.wsServer = new ChatWebSocketServer(this.orchestrator, registry);
+    this.wsServer.attach(this.httpServer);
   }
 
-  private setupMiddleware(): void {
-    this.app.use(express.json());
-    this.app.use(express.static(this.webDir));
-  }
-
-  private setupRoutes(): void {
-    this.app.get('/api/health', (req, res) => {
-      res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        version: '2.0.0',
-        activeConversations: this.manager.getAllConversations().length
-      });
-    });
-
-    this.app.get('/api/agents', (req, res) => {
-      const agents = this.manager.getAgents().map(a => ({
-        id: a.id,
-        name: a.name,
-        role: a.role,
-        type: a.type
-      }));
-      res.json(agents);
-    });
-
-    this.app.get('/api/agents/status', async (req, res) => {
-      const agents = this.manager.getAgents();
-      const statusList = await Promise.all(
-        agents.map(async (a) => ({
-          id: a.id,
-          name: a.name,
-          type: a.type,
-          available: await a.adapter.isAvailable()
-        }))
-      );
-      res.json(statusList);
-    });
-
-    this.app.get('/api/conversations', (req, res) => {
-      const conversations = this.manager.getAllConversations().map(c => ({
-        id: c.id,
-        title: c.title,
-        status: c.status,
-        phase: c.phase,
-        projectPath: c.projectPath,
-        currentTurn: c.currentTurn,
-        maxTurns: c.maxTurns,
-        messageCount: c.messages.length
-      }));
-      res.json(conversations);
-    });
-
-    this.app.get('/api/conversations/:id', (req, res) => {
-      const conversation = this.manager.getConversation(req.params.id);
-      if (!conversation) {
-        res.status(404).json({ error: 'Conversación no encontrada' });
-        return;
-      }
-      res.json(conversation);
-    });
-
-    this.app.get('/', (req, res) => {
-      res.sendFile(join(this.webDir, 'index.html'));
-    });
-  }
-
-  private registerDefaultAgents(): void {
-    const opencodeAdapter = new OpenCodeAdapter({
-      url: this.config.opencode.url,
-      password: this.config.opencode.password
-    });
-
-    const opencodeAgent: Agent = {
-      id: 'opencode',
-      name: 'OpenCode Desktop',
-      role: 'Desarrollador / Core - Implementa código funcional y modular en terminal/IDE',
-      type: 'opencode',
-      adapter: opencodeAdapter
-    };
-
-    const antigravityAdapter = new AntigravityAdapter({
-      apiKey: this.config.antigravity.apiKey
-    });
-
-    const antigravityAgent: Agent = {
-      id: 'antigravity',
-      name: 'Google Antigravity',
-      role: 'Arquitecto / Líder Técnico - Diseña arquitectura, asigna roles y revisa código',
-      type: 'antigravity',
-      adapter: antigravityAdapter
-    };
-
-    const interpreterAdapter = new InterpreterAdapter();
-    const interpreterAgent: Agent = {
-      id: 'interpreter',
-      name: 'Open Interpreter',
-      role: 'Ejecutor de Entorno / QA - Corre scripts, ejecuta pruebas en terminal y valida salidas',
-      type: 'interpreter',
-      adapter: interpreterAdapter
-    };
-
-    const aiderAdapter = new AiderAdapter();
-    const aiderAgent: Agent = {
-      id: 'aider',
-      name: 'Aider Git Master',
-      role: 'Control de Versiones & Diffs - Gestiona ramas, verifica cambios y prepara commits',
-      type: 'aider',
-      adapter: aiderAdapter
-    };
-
-    this.manager.registerAgent(antigravityAgent);
-    this.manager.registerAgent(opencodeAgent);
-    this.manager.registerAgent(interpreterAgent);
-    this.manager.registerAgent(aiderAgent);
-  }
-
-  async start(): Promise<void> {
-    this.wsServer.attach(this.server);
-
-    return new Promise((resolve) => {
-      this.server.listen(this.config.port, this.config.host, () => {
-        console.log(`
-╔═══════════════════════════════════════════════════════════════╗
-║         Antigravity ↔ OpenCode Collaboration Bridge 2.0      ║
-╠═══════════════════════════════════════════════════════════════╣
-║  Servidor Web/API:  http://${this.config.host}:${this.config.port}          ║
-║  WebSocket Server:  ws://${this.config.host}:${this.config.port}/ws        ║
-║  Target OpenCode:   ${this.config.opencode.url.padEnd(35)}║
-║  Modelo Antigravity: ${(this.config.antigravity.model || 'gemini-2.5-flash').padEnd(33)}║
-╚═══════════════════════════════════════════════════════════════╝
-        `);
+  start(): Promise<void> {
+    const { host, port } = this.config.server;
+    return new Promise((resolve, reject) => {
+      this.httpServer.once('error', reject);
+      this.httpServer.listen(port, host, () => {
+        printBanner(this.config);
         resolve();
       });
     });
   }
 
-  async stop(): Promise<void> {
-    return new Promise((resolve) => {
-      this.server.close(() => {
-        console.log('Servidor detenido');
-        resolve();
-      });
-    });
+  stop(): Promise<void> {
+    this.wsServer.close();
+    return new Promise(resolve => this.httpServer.close(() => resolve()));
   }
+}
+
+/** Localiza `web/` tanto en desarrollo (`src/web`) como compilado (`dist/web`). */
+function resolveWebDir(): string {
+  const candidates = [
+    join(__dirname, '..', 'web'),
+    join(process.cwd(), 'dist', 'web'),
+    join(process.cwd(), 'src', 'web')
+  ];
+  return candidates.find(existsSync) ?? candidates[0];
+}
+
+/**
+ * Sirve las librerías del panel (marked, DOMPurify, highlight.js) directamente
+ * desde `node_modules`, para que funcione tanto con `npm run dev` como
+ * compilado, y sin necesidad de internet.
+ */
+function createVendorRoutes(): express.Router {
+  const router = express.Router();
+  const modules = join(process.cwd(), 'node_modules');
+  const files: Record<string, string> = {
+    'marked.min.js': join(modules, 'marked', 'marked.min.js'),
+    'purify.min.js': join(modules, 'dompurify', 'dist', 'purify.min.js'),
+    'highlight.min.js': join(modules, '@highlightjs', 'cdn-assets', 'highlight.min.js'),
+    'atom-one-dark.min.css': join(modules, '@highlightjs', 'cdn-assets', 'styles', 'atom-one-dark.min.css')
+  };
+  for (const [name, file] of Object.entries(files)) {
+    router.get(`/${name}`, (_req, res) => res.sendFile(file));
+  }
+  return router;
+}
+
+function printBanner(config: AppConfig): void {
+  const { host, port } = config.server;
+  const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+  console.log([
+    '',
+    '  Multi-Agent Bridge v' + APP_VERSION,
+    '  ─────────────────────────────────────────────',
+    `  Panel web      http://${displayHost}:${port}`,
+    `  WebSocket      ws://${displayHost}:${port}/ws`,
+    `  Estado agentes http://${displayHost}:${port}/api/agents/status`,
+    `  Historial      ${config.historyDir}`,
+    ''
+  ].join('\n'));
 }

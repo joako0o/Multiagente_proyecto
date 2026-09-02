@@ -1,45 +1,28 @@
+/**
+ * Punto de entrada. Carga `.env`, construye la configuración y arranca el servidor.
+ */
 import dotenv from 'dotenv';
-import { AntigravityOpenCodeServer } from './server';
-import { ServerConfig } from './types';
+import { loadConfig } from './config';
+import { BridgeServer } from './server';
 
 dotenv.config();
 
-const config: ServerConfig = {
-  port: parseInt(process.env.PORT || '3000'),
-  host: process.env.HOST || 'localhost',
-  opencode: {
-    url: process.env.OPENCODE_URL || 'http://localhost:4096',
-    password: process.env.OPENCODE_PASSWORD,
-    apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.OPENCODE_MODEL || 'gemini-2.5-flash'
-  },
-  antigravity: {
-    apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.ANTIGRAVITY_MODEL || 'gemini-2.5-flash'
-  }
-};
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const server = new BridgeServer(config);
 
-async function main() {
-  const server = new AntigravityOpenCodeServer(config);
-
-  process.on('SIGINT', async () => {
-    console.log('\nShutting down...');
+  const shutdown = async (signal: string) => {
+    console.log(`\n${signal} recibido, cerrando...`);
     await server.stop();
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
-  process.on('SIGTERM', async () => {
-    console.log('\nShutting down...');
-    await server.stop();
-    process.exit(0);
-  });
-
-  try {
-    await server.start();
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
+  await server.start();
 }
 
-main();
+main().catch((err) => {
+  console.error('No se pudo iniciar el servidor:', err);
+  process.exit(1);
+});

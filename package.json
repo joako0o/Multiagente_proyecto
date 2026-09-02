@@ -1,15 +1,16 @@
 {
-  "name": "antigravity-opencode-bridge",
-  "version": "2.0.0",
-  "description": "Puente de colaboración multi-agente: Google Antigravity (Gemini) ↔ OpenCode Desktop ↔ Open Interpreter ↔ Aider, con orquestación por turnos, fases y panel web en tiempo real.",
+  "name": "multi-agent-bridge",
+  "version": "3.0.0",
+  "description": "Orquestador multi-agente por turnos: Antigravity (arquitecto LLM) coordina a OpenCode, OpenHands, Aider y Open Interpreter sobre un proyecto real, con panel web en tiempo real.",
   "main": "dist/index.js",
   "private": true,
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.js",
+    "build": "npm run clean && tsc && node scripts/copy-assets.js",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --require ts-node/register --test tests/*.test.ts",
     "test:e2e": "node scripts/test-e2e.js",
     "bridge": "python src/scripts/antigravity_bridge.py"
   },
@@ -17,8 +18,11 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@highlightjs/cdn-assets": "^11.12.0",
+    "dompurify": "^3.4.14",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "marked": "^12.0.2",
     "uuid": "^11.0.5",
     "ws": "^8.18.0"
   },

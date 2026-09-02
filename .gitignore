@@ -1,3 +1,6 @@
+# Compilado (se genera con npm run build)
+dist/
+
 # Dependencias
 node_modules/
 
